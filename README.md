@@ -54,6 +54,7 @@ Testes HTTP/configuração executam sem PostgreSQL. Testes de PostgreSQL exigem 
 
 ## Documentação
 
+- [Estado e próximas etapas](docs/status-and-roadmap.md): objetivo do projeto, entregas concluídas, pendências por fase e critérios de aceite.
 - [Arquitetura e decisões](docs/architecture.md): modelo, uploads, segurança, recuperação e roadmap.
 - [Desenvolvimento](docs/development.md): configuração, PostgreSQL, migrations e validação local.
 - [Autenticação](docs/authentication.md): conta única, contratos HTTP, tokens, revogação e chaves de proteção.

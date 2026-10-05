@@ -4,6 +4,8 @@ Nexora é uma nuvem privada para fotos, vídeos e arquivos pessoais, executada e
 
 Este documento registra o desenho aprovado. As fases 1 e 2 cobrem fundação e autenticação. Modelos e fluxos de storage, uploads e mídia continuam previstos para as fases seguintes; não estão disponíveis na API atual.
 
+Consulte [estado e próximas etapas](status-and-roadmap.md) para o inventário das entregas atuais, as pendências de cada fase e seus critérios de aceite.
+
 ## Decisões e limites do MVP
 
 - .NET 10, ASP.NET Core Web API, Entity Framework Core e PostgreSQL 18.
@@ -30,6 +32,8 @@ src/
 tests/
   Nexora.UnitTests
   Nexora.IntegrationTests
+apps/
+  Nexora.Mobile
 ```
 
 `Domain` contém entidades e invariantes sem dependência de ASP.NET Core, EF Core ou filesystem. `Application` coordena casos de uso e define os contratos necessários. `Infrastructure` implementa persistência, storage e integrações. `Api` concentra HTTP, autenticação, validação de entrada e composição de dependências. `Worker` será o host de processamento e manutenção em background.
@@ -43,7 +47,7 @@ Não introduzir repositório genérico, mediator, event bus ou camadas adicionai
 | Usuário Identity | Conta administrativa e credenciais verificadas pelo ASP.NET Core Identity. |
 | Device | Identidade do dispositivo, proprietário, plataforma, atividade e revogação. |
 | AuthSession | Sessão autenticada vinculada ao usuário e dispositivo, com expiração e revogação. |
-| RefreshToken | Hash do token, sessão, expiração, consumo, sucessor e revogação para rotação e detecção de reutilização. |
+| RefreshToken | Hash do token, sessão, expiração, consumo e sucessor para rotação e detecção de reutilização; revogação controlada pela sessão. |
 | Blob | Conteúdo imutável: SHA-256, tamanho, chave interna, MIME detectado e estado de publicação. |
 | Asset | Referência do proprietário ao Blob: nome original, upload, data da foto, favorito e lixeira. |
 | UploadSession | Sessão retomável, tamanho esperado, chunks, estado, atividade e resultado. |
@@ -87,7 +91,8 @@ Os endpoints da Fase 2 estão disponíveis; os das fases posteriores continuam p
 | 4 | `GET /api/assets`, `GET /api/assets/{id}`, `GET /api/assets/{id}/content` | Listagem básica, metadados e download com HTTP Range. |
 | 4 | `GET /api/storage` | Espaço físico, tamanho lógico e reservas. |
 | 5 | `GET /api/assets/{id}/thumbnail`, `GET /api/assets/{id}/preview` | Servir derivados autorizados, sem carregar o original. |
-| 6 | `DELETE /api/assets/{id}`, `GET /api/trash`, `POST /api/assets/{id}/restore` | Soft delete, listagem da lixeira e restauração explícita. |
+| 6 | `PATCH /api/assets/{id}` | Alterar favoritos e os metadados editáveis previstos. |
+| 6 | `DELETE /api/assets/{id}`, `GET /api/trash`, `POST /api/trash/{id}/restore` | Soft delete, listagem da lixeira e restauração explícita. |
 
 Usar Problem Details para erros e DTOs sem caminhos físicos ou entidades EF expostas. A conclusão do upload retorna `202` durante processamento; consultar a sessão informa o resultado ou a falha. Downloads completos/parciais trabalham com Streams e respeitam Range válido, inclusive `206` e `416` quando aplicável.
 
@@ -118,6 +123,7 @@ Defaults previstos, configuráveis quando esses fluxos forem implementados:
 | Sessões simultâneas por usuário | 2, condicionadas à capacidade global. |
 | Expiração de upload inativo | 7 dias sem atividade. |
 | Retenção na lixeira | 30 dias. |
+| Concorrência de processamento | Uma montagem e uma imagem por vez. |
 
 Reservar aproximadamente `2 × tamanho declarado` na criação da sessão, serializando a admissão no banco e conferindo espaço real. O orçamento de 50 GiB admite somente um upload de 20 GiB durante montagem, mesmo que o teto de sessões seja dois. Não permitir que o corpo exceda o tamanho declarado; considerar derivados e demais usos do volume na avaliação de espaço.
 
@@ -127,7 +133,7 @@ Reservar aproximadamente `2 × tamanho declarado` na criação da sessão, seria
 
 Chaves internas são opacas e imutáveis, com identificador distinto por geração, por exemplo `blobs/ab/cd/<blob-id>`. SHA-256 identifica conteúdo no banco; uma chave física por geração impede uma limpeza antiga de remover um novo upload do mesmo hash.
 
-O contrato de IBlobStorage deve receber/devolver Streams e permitir publicação imutável, leitura completa/parcial e exclusão idempotente. Spool e chunks pertencem a uma abstração separada de staging. Rename é uma otimização interna do storage local, sem virar requisito da interface; um futuro storage S3 poderá implementar publicação por PUT/multipart sem reescrever os casos de uso.
+O contrato de IBlobStorage deve receber/devolver Streams e permitir publicação imutável, leitura completa/parcial, consulta de informações do objeto e exclusão idempotente. Spool e chunks pertencem a uma abstração separada de staging. Rename é uma otimização interna do storage local, sem virar requisito da interface; um futuro storage S3 poderá implementar publicação por PUT/multipart sem reescrever os casos de uso.
 
 PostgreSQL e filesystem não compartilham uma transação. O storage previsto utilizará intenção persistida, publicação local sem sobrescrita e reconciliação após reinício. A recuperação examinará sessões em finalização e Blobs Staging: remontar antes da publicação, concluir após verificar conteúdo publicado ou registrar uma falha explícita quando os bytes esperados estiverem ausentes. Nunca apagar metadados silenciosamente para esconder inconsistências.
 
@@ -158,7 +164,7 @@ Após o período configurável de retenção, o worker removerá o Asset. Para r
 - Logs estruturados com IDs técnicos e resultado, sem tokens, connection strings, conteúdo de arquivos, nomes pessoais ou coordenadas.
 - Observabilidade de espaço, reservas, jobs e uploads falhos; diferenciar tamanho lógico de Assets de bytes físicos de Blobs, derivados, lixeira e temporários.
 
-Nexora oferece armazenamento; uma única cópia no servidor não é backup. Documentar backup conjunto de PostgreSQL e storage, preferencialmente pausando gravações/workers ou usando uma estratégia de snapshot consistente. Testar restauração em ambiente isolado. A integração com restic/borg não pertence à Fase 1.
+Nexora oferece armazenamento; uma única cópia no servidor não é backup. Documentar backup conjunto de PostgreSQL, storage, configuração e chaves, preferencialmente pausando gravações/workers ou usando uma estratégia de snapshot consistente. Testar restauração em ambiente isolado. A integração com restic/borg fica fora do escopo atual; a Fase 7 prevê procedimentos manuais documentados.
 
 ## Testes que orientam as próximas fases
 
@@ -180,7 +186,7 @@ Na Fase 1, verificar configuração, health checks, acesso PostgreSQL e migratio
 | 5 — Imagens | SkiaSharp/MetadataExtractor, metadados iniciais e thumbnails/previews JPEG/PNG/WebP usando o Worker existente. |
 | 6 — Timeline e lixeira | Listagem/timeline, favoritos, soft delete, restore, purge e GC seguro. |
 | 7 — Operação | Deploy systemd/Arch, HTTPS/Tailscale, revisão de segurança, observabilidade e procedimentos de backup/restauração. |
-| 8 — Mobile | Cliente MAUI e sincronização; execução em background específica de Android/iOS. |
+| 8 — Mobile | Contrato de sincronização, registro de mudanças e cliente MAUI Android; iOS posteriormente, respeitando as restrições de background de cada plataforma. |
 
 Segurança acompanha cada funcionalidade desde sua criação; a Fase 7 verifica e fecha a operação de produção. A etapa atual termina na Fase 2. O próximo incremento trata dos modelos/storage, sem antecipar endpoints de arquivos ou cliente mobile.
 
