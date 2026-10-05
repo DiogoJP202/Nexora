@@ -14,6 +14,7 @@ public sealed class EnvironmentConfigurationTests
             "O runtimeconfig da API precisa ser copiado ao output dos testes.");
 
         var port = FindAvailableLoopbackPort();
+        using var protectionFiles = new DataProtectionTestFiles();
         var startInfo = new ProcessStartInfo
         {
             FileName = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet",
@@ -41,6 +42,8 @@ public sealed class EnvironmentConfigurationTests
         startInfo.Environment["ConnectionStrings__Nexora"] = "Host=127.0.0.1";
         startInfo.Environment["NEXORA_Storage__RootPath"] = Path.Combine(Path.GetTempPath(), "nexora-env-tests");
         startInfo.Environment["NEXORA_ConnectionStrings__Nexora"] = ApiFactory.UnreachableConnectionString;
+        startInfo.Environment["NEXORA_DataProtection__KeyDirectory"] = protectionFiles.KeyDirectory;
+        startInfo.Environment["NEXORA_DataProtection__CertificatePath"] = protectionFiles.CertificatePath;
 
         using var process = new Process { StartInfo = startInfo };
         Assert.True(process.Start());

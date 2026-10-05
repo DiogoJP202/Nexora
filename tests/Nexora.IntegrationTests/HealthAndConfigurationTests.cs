@@ -145,6 +145,27 @@ public sealed class HealthAndConfigurationTests
         Assert.DoesNotContain(secret, factory.CapturedLogs.Text);
     }
 
+    public static IEnumerable<object[]> InvalidKeyDirectories()
+    {
+        yield return [""];
+        yield return ["relative-keys"];
+        yield return [Path.GetPathRoot(Path.GetTempPath())!];
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidKeyDirectories))]
+    public async Task InvalidDataProtectionKeyDirectoryPreventsStartup(string directory)
+    {
+        await using var factory = new ApiFactory(configuration: new Dictionary<string, string?>
+        {
+            ["DataProtection:KeyDirectory"] = directory
+        });
+
+        var error = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
+
+        Assert.Contains("DataProtection:KeyDirectory", error.ToString());
+    }
+
     internal static async Task AssertHealthResponseAsync(HttpResponseMessage response, string status)
     {
         Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);

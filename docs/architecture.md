@@ -2,7 +2,7 @@
 
 Nexora é uma nuvem privada para fotos, vídeos e arquivos pessoais, executada em um único servidor Arch Linux com aproximadamente 500 GB disponíveis. O MVP terá uma conta administrativa, acesso privado por Tailscale e uma API ASP.NET Core. O cliente mobile será uma etapa posterior.
 
-Este documento registra o desenho aprovado. A Fase 1 implementa somente a fundação técnica; os modelos e fluxos descritos para fases posteriores ainda não estão disponíveis na API.
+Este documento registra o desenho aprovado. As fases 1 e 2 cobrem fundação e autenticação. Modelos e fluxos de storage, uploads e mídia continuam previstos para as fases seguintes; não estão disponíveis na API atual.
 
 ## Decisões e limites do MVP
 
@@ -36,7 +36,7 @@ tests/
 
 Não introduzir repositório genérico, mediator, event bus ou camadas adicionais sem uma necessidade concreta. Manter dependências direcionadas para Domain/Application e reutilizar recursos nativos do framework.
 
-## Modelo previsto
+## Modelo atual e evolução
 
 | Modelo | Responsabilidade |
 | --- | --- |
@@ -50,29 +50,33 @@ Não introduzir repositório genérico, mediator, event bus ou camadas adicionai
 | UploadChunk | Índice, tamanho, SHA-256 e localização interna de um chunk confirmado. |
 | BackgroundJob | Trabalho durável, tentativas, próxima execução e lease do worker. |
 
-Separar Blob e Asset permite deduplicar bytes sem acoplar nome, favorito ou exclusão à cópia física. SHA-256 é calculado pelo servidor e tem unicidade no Blob. Um Asset por `(OwnerId, BlobId)` evita duplicatas lógicas mesmo em conclusões concorrentes.
+Identity, Device, AuthSession e RefreshToken pertencem à Fase 2. As entidades de conteúdo, upload e jobs serão introduzidas nas fases de storage e arquivos.
 
-Enviar novamente conteúdo idêntico retorna o Asset ativo existente, sem alterar seus metadados. Se o Asset estiver na lixeira, retornar um conflito que exige restauração explícita. Concluir novamente a mesma UploadSession retorna seu resultado anterior.
+Separar Blob e Asset permitirá deduplicar bytes sem acoplar nome, favorito ou exclusão à cópia física. SHA-256 será calculado pelo servidor e terá unicidade no Blob. Um Asset por `(OwnerId, BlobId)` evitará duplicatas lógicas mesmo em conclusões concorrentes.
+
+Enviar novamente conteúdo idêntico retornará o Asset ativo existente, sem alterar seus metadados. Se o Asset estiver na lixeira, retornar um conflito que exige restauração explícita. Concluir novamente a mesma UploadSession retornará seu resultado anterior.
 
 Não manter `ReferenceCount` persistido inicialmente: consultar referências incluindo a lixeira evita divergência de contadores. A Fase 5 acrescenta dimensões, orientação e data extraída da imagem. Câmera e geolocalização ficam para um incremento posterior à Fase 5. Preservar datas EXIF sem fuso como dados locais de origem, sem adivinhar que representam UTC; timestamps operacionais da aplicação são UTC.
 
 ## Autenticação e acesso
 
-Criar o administrador por um comando local de bootstrap, com senha solicitada sem eco e sem registrá-la em logs; não oferecer registro público. A implementação da autenticação pertence à Fase 2; a Fase 1 não cria contas nem emite tokens.
+Criar o administrador por comando local `bootstrap-admin`, com email, senha e confirmação solicitados interativamente, sem eco da senha nem registro em logs. A criação é serializada no banco para preservar a conta única. `reset-admin-password` solicita nova senha e confirmação sem eco e revoga todas as sessões. Não há registro público ou reset de senha por HTTP.
 
-O login verificará credenciais pelo Identity e emitirá access token opaco do mecanismo nativo de bearer authentication do ASP.NET Core, válido por cinco minutos. AuthSession terá duração de 30 dias. O refresh token será aleatório, com pelo menos 256 bits de entropia, vinculado à sessão/dispositivo; guardar somente seu hash, rotacionar a cada uso e revogar a família diante de reutilização.
+O login verifica credenciais pelo Identity e emite access token opaco do mecanismo nativo de bearer authentication do ASP.NET Core, válido por cinco minutos. AuthSession tem duração absoluta de 30 dias. O refresh token é aleatório, com 256 bits de entropia, vinculado à sessão/dispositivo; guardar somente SHA-256, rotacionar a cada uso e revogar a família diante de reutilização. Os clientes serializam refresh: uma resposta perdida após consumo do token pode exigir novo login.
 
-Cada requisição autenticada verifica no banco que a sessão está ativa e que seu dispositivo pertence ao usuário e não foi revogado. Revogar o dispositivo revoga suas sessões, bloqueando inclusive access tokens ainda não expirados. Device representa o cadastro vinculado à autenticação; nome, plataforma e modelo informados pelo cliente não constituem atestação de hardware.
+Cada requisição autenticada verifica no banco security stamp, sessão ativa, expiração, lockout e dispositivo pertencente ao usuário e não revogado. Falha do banco fecha o acesso com `503`. Revogar o dispositivo revoga suas sessões, bloqueando inclusive access tokens ainda não expirados. Device representa o cadastro vinculado à autenticação; nome, plataforma e modelo informados pelo cliente não constituem atestação de hardware. Atualizar LastSeen no máximo a cada cinco minutos.
 
-As chaves de ASP.NET Core Data Protection que protegem os tokens devem persistir em diretório permanente fora da instalação, com permissões restritas, backup e restauração documentados. Reinstalar a aplicação não deve gerar outro conjunto de chaves inadvertidamente. Rate limiting, proteção contra tentativas repetidas e logs sanitizados acompanham esses fluxos desde sua implementação.
+As chaves de ASP.NET Core Data Protection persistem fora da instalação e do storage, com ApplicationName `Nexora.Auth`, DPAPI do usuário no Windows e certificado obrigatório em Linux fora de Development. Desenvolvimento Linux admite key ring sem criptografia de arquivo em diretório `0700`; isso não é a configuração de produção. Backup deve incluir chaves e material necessário para recuperá-las. Reinstalar a aplicação não deve gerar outro conjunto de chaves inadvertidamente.
 
-Endpoints de Assets, uploads, lixeira e conteúdo sempre verificam o proprietário. UUID, StorageKey ou SHA-256 não concedem acesso. Consultas de existência por hash só podem retornar resultados autorizados para a conta solicitante.
+Passphrases têm de 14 a 256 caracteres, sem regras artificiais de composição; email também é username. Identity bloqueia a conta por 15 minutos após cinco falhas. Login tem limite de cinco chamadas por IP/minuto e refresh de 30 por IP/minuto. Os [contratos e fluxos implementados](authentication.md) detalham login, refresh e revogação.
 
-Downloads autenticados usam streaming e nomes de resposta sanitizados. MIME e extensão informados pelo cliente não são prova de conteúdo; arquivos arbitrários não devem ser executados nem renderizados como HTML no domínio da API.
+Os futuros endpoints de Assets, uploads, lixeira e conteúdo sempre verificarão o proprietário. UUID, StorageKey ou SHA-256 não concederão acesso. Consultas de existência por hash só poderão retornar resultados autorizados para a conta solicitante.
 
-## Contratos HTTP previstos
+Downloads autenticados usarão streaming e nomes de resposta sanitizados. MIME e extensão informados pelo cliente não são prova de conteúdo; arquivos arbitrários não devem ser executados nem renderizados como HTML no domínio da API.
 
-Estes endpoints pertencem às fases indicadas e não estão implementados na Fase 1. Recursos de usuário sempre exigem autenticação e autorização; login/refresh têm validação e limitação próprias.
+## Contratos HTTP atuais e previstos
+
+Os endpoints da Fase 2 estão disponíveis; os das fases posteriores continuam previstos. Recursos de usuário sempre exigem autenticação e autorização; login/refresh têm validação e limitação próprias.
 
 | Fase | Contrato | Responsabilidade |
 | --- | --- | --- |
@@ -125,23 +129,23 @@ Chaves internas são opacas e imutáveis, com identificador distinto por geraç�
 
 O contrato de IBlobStorage deve receber/devolver Streams e permitir publicação imutável, leitura completa/parcial e exclusão idempotente. Spool e chunks pertencem a uma abstração separada de staging. Rename é uma otimização interna do storage local, sem virar requisito da interface; um futuro storage S3 poderá implementar publicação por PUT/multipart sem reescrever os casos de uso.
 
-PostgreSQL e filesystem não compartilham uma transação. O MVP utiliza intenção persistida, publicação local sem sobrescrita e reconciliação após reinício. A recuperação examina sessões em finalização e Blobs Staging: remontar antes da publicação, concluir após verificar conteúdo publicado ou registrar uma falha explícita quando os bytes esperados estiverem ausentes. Nunca apagar metadados silenciosamente para esconder inconsistências.
+PostgreSQL e filesystem não compartilham uma transação. O storage previsto utilizará intenção persistida, publicação local sem sobrescrita e reconciliação após reinício. A recuperação examinará sessões em finalização e Blobs Staging: remontar antes da publicação, concluir após verificar conteúdo publicado ou registrar uma falha explícita quando os bytes esperados estiverem ausentes. Nunca apagar metadados silenciosamente para esconder inconsistências.
 
-Manter `temp` e `blobs` no mesmo filesystem permite rename local atômico, mas rename isolado não assegura durabilidade. Ao implementar storage, o adaptador local precisará fazer flush do arquivo e sincronizar os diretórios Linux envolvidos antes de confirmar a publicação durável no banco. Essa responsabilidade fica no adaptador, sem contaminar a interface de storage. A Fase 1 apenas valida o caminho configurado e não implementa esse fluxo.
+Manter `temp` e `blobs` no mesmo filesystem permite rename local atômico, mas rename isolado não assegura durabilidade. Ao implementar storage, o adaptador local precisará fazer flush do arquivo e sincronizar os diretórios Linux envolvidos antes de confirmar a publicação durável no banco. Essa responsabilidade fica no adaptador, sem contaminar a interface de storage. Até a Fase 2, a aplicação apenas valida o caminho configurado e não implementa esse fluxo.
 
 Reconciliação recupera operações interrompidas; não recria bytes perdidos por falha física. Backup e teste de restauração continuam necessários para proteger o conteúdo diante de falhas de hardware e perda de dados.
 
 ## Processamento e exclusão
 
-BackgroundJob é a fonte durável de trabalho. A alteração de negócio e o job são gravados na mesma transação. O worker reclama jobs com `FOR UPDATE SKIP LOCKED`, utiliza lease renovável e só confirma resultados com seu token de lease válido. Reexecução deve ser idempotente, com tentativas limitadas e falhas visíveis. Channel pode ser usado para sinalização, sem substituir a persistência.
+Na Fase 4, BackgroundJob será a fonte durável de trabalho. A alteração de negócio e o job serão gravados na mesma transação. O worker reclamará jobs com `FOR UPDATE SKIP LOCKED`, utilizará lease renovável e só confirmará resultados com seu token de lease válido. Reexecução deve ser idempotente, com tentativas limitadas e falhas visíveis. Channel poderá ser usado para sinalização, sem substituir a persistência.
 
 Na Fase 5, usar SkiaSharp para imagens e MetadataExtractor para metadados de JPEG, PNG e WebP. Aplicar orientação e gerar thumbnail com lado máximo de 256 px e preview com lado máximo de 1280 px, preservando proporção e sem ampliar imagens menores. Datas EXIF sem fuso permanecem preservadas, sem conversão UTC inventada; câmera/geolocalização não entram nesta fase.
 
-A falha do processamento não remove nem invalida um original publicado. A API informa o estado da mídia e não carrega o original para servir cards. Processamento avançado de vídeos e FFmpeg ficam para depois; a Fase 4 já suporta HTTP Range para conteúdo, sem antecipar transcodificação.
+A falha do processamento não removerá nem invalidará um original publicado. A API informará o estado da mídia e não carregará o original para servir cards. Processamento avançado de vídeos e FFmpeg ficam para depois; a Fase 4 introduzirá HTTP Range para conteúdo, sem antecipar transcodificação.
 
-Soft delete altera `Asset.DeletedAt` e mantém o Blob. Lixeira conserva bytes e referências. Restauração e purge disputam o mesmo lock do Asset; uma exclusão definitiva concluída não pode ser restaurada pela API.
+Na Fase 6, soft delete alterará `Asset.DeletedAt` e manterá o Blob. Lixeira conservará bytes e referências. Restauração e purge disputarão o mesmo lock do Asset; uma exclusão definitiva concluída não poderá ser restaurada pela API.
 
-Após o período configurável de retenção, o worker remove o Asset. Para remover um Blob sem referências, trava sua linha, verifica ausência de todos os Assets e muda o estado para `Deleting` em transação. A criação de referências também trava essa linha e aceita somente `Ready`. Depois do commit, a exclusão física é idempotente e a linha é removida quando a limpeza terminar.
+Após o período configurável de retenção, o worker removerá o Asset. Para remover um Blob sem referências, travará sua linha, verificará ausência de todos os Assets e mudará o estado para `Deleting` em transação. A criação de referências também travará essa linha e aceitará somente `Ready`. Depois do commit, a exclusão física será idempotente e a linha será removida quando a limpeza terminar.
 
 ## Segurança, operação e backup
 
@@ -150,7 +154,7 @@ Após o período configurável de retenção, o worker remove o Asset. Para remo
 - Streaming limitado, timeouts, cancelamento e controle de capacidade antes e durante a escrita.
 - Validação de MIME por conteúdo e limites de dimensões/pixels durante a decodificação de imagens.
 - Rate limiting e autorização adicionados junto aos endpoints que precisam deles, antes de disponibilizar conteúdo pessoal.
-- Tailscale Serve termina HTTPS e encaminha para a API em loopback; Funnel permanece desativado e grants restringem o acesso privado na tailnet.
+- Na operação prevista, Tailscale Serve terminará HTTPS e encaminhará para a API em loopback; Funnel permanecerá desativado e grants restringirão o acesso privado na tailnet.
 - Logs estruturados com IDs técnicos e resultado, sem tokens, connection strings, conteúdo de arquivos, nomes pessoais ou coordenadas.
 - Observabilidade de espaço, reservas, jobs e uploads falhos; diferenciar tamanho lógico de Assets de bytes físicos de Blobs, derivados, lixeira e temporários.
 
@@ -178,7 +182,7 @@ Na Fase 1, verificar configuração, health checks, acesso PostgreSQL e migratio
 | 7 — Operação | Deploy systemd/Arch, HTTPS/Tailscale, revisão de segurança, observabilidade e procedimentos de backup/restauração. |
 | 8 — Mobile | Cliente MAUI e sincronização; execução em background específica de Android/iOS. |
 
-Segurança acompanha cada funcionalidade desde sua criação; a Fase 7 verifica e fecha a operação de produção. A implementação autorizada nesta etapa termina na Fase 1. O próximo incremento será a autenticação, sem antecipar endpoints de arquivos ou cliente mobile.
+Segurança acompanha cada funcionalidade desde sua criação; a Fase 7 verifica e fecha a operação de produção. A etapa atual termina na Fase 2. O próximo incremento trata dos modelos/storage, sem antecipar endpoints de arquivos ou cliente mobile.
 
 ## Referências técnicas
 

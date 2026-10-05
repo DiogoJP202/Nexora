@@ -15,4 +15,3 @@ secrets.json
 *.key
 .local/
 artifacts/
-

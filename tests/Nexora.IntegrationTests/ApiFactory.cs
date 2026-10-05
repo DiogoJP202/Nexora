@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -16,18 +17,25 @@ internal sealed class ApiFactory : WebApplicationFactory<global::Program>
 
     private readonly string _environment;
     private readonly IReadOnlyDictionary<string, string?> _configuration;
+    private readonly TimeProvider? _clock;
+    private readonly bool _usePersistentKeys;
 
     internal CapturedLogProvider CapturedLogs { get; } = new();
 
     public ApiFactory(
         string environment = "Development",
-        IReadOnlyDictionary<string, string?>? configuration = null)
+        IReadOnlyDictionary<string, string?>? configuration = null,
+        TimeProvider? clock = null,
+        bool usePersistentKeys = false)
     {
         _environment = environment;
+        _clock = clock;
+        _usePersistentKeys = usePersistentKeys;
         var settings = new Dictionary<string, string?>
         {
             ["Storage:RootPath"] = Path.Combine(Path.GetTempPath(), "nexora-tests"),
-            ["ConnectionStrings:Nexora"] = UnreachableConnectionString
+            ["ConnectionStrings:Nexora"] = UnreachableConnectionString,
+            ["DataProtection:CertificatePath"] = Path.Combine(Path.GetTempPath(), "nexora-tests-unused-certificate.pfx")
         };
 
         if (configuration is not null)
@@ -50,6 +58,17 @@ internal sealed class ApiFactory : WebApplicationFactory<global::Program>
         {
             services.RemoveAll<ILoggerProvider>();
             services.AddSingleton<ILoggerProvider>(CapturedLogs);
+            if (!_usePersistentKeys)
+            {
+                services.RemoveAll<IDataProtectionProvider>();
+                services.AddSingleton<IDataProtectionProvider>(new EphemeralDataProtectionProvider());
+            }
+
+            if (_clock is not null)
+            {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton(_clock);
+            }
         });
     }
 }

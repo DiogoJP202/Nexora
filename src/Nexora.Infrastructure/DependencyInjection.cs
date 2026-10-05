@@ -1,9 +1,13 @@
+using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using Nexora.Application.Authentication;
+using Nexora.Infrastructure.Authentication;
 using Nexora.Infrastructure.Configuration;
 using Nexora.Infrastructure.HealthChecks;
 using Nexora.Infrastructure.Identity;
@@ -39,9 +43,35 @@ public static class DependencyInjection
                     CoreEventId.SaveChangesFailed));
         });
 
-        services.AddIdentityCore<NexoraUser>(options => options.Stores.SchemaVersion = IdentitySchemaVersions.Version3)
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddHttpContextAccessor();
+        services.AddAuthentication(AuthenticationConstants.Scheme).AddBearerToken(AuthenticationConstants.Scheme);
+        services.AddOptions<BearerTokenOptions>(AuthenticationConstants.Scheme).Configure<TimeProvider>((options, clock) =>
+        {
+            options.TimeProvider = clock;
+            options.BearerTokenExpiration = AuthenticationConstants.AccessTokenLifetime;
+        });
+
+        services.AddIdentityCore<NexoraUser>(options =>
+            {
+                options.Stores.SchemaVersion = IdentitySchemaVersions.Version3;
+                options.User.RequireUniqueEmail = true;
+                options.Password.RequiredLength = 14;
+                options.Password.RequireDigit = false;
+                options.Password.RequireLowercase = false;
+                options.Password.RequireUppercase = false;
+                options.Password.RequireNonAlphanumeric = false;
+                options.Lockout.AllowedForNewUsers = true;
+                options.Lockout.MaxFailedAccessAttempts = 5;
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+            })
             .AddRoles<IdentityRole<Guid>>()
-            .AddEntityFrameworkStores<NexoraDbContext>();
+            .AddEntityFrameworkStores<NexoraDbContext>()
+            .AddSignInManager();
+
+        services.AddSingleton<DummyPasswordVerifier>();
+        services.AddScoped<IAuthenticationService, AuthenticationService>();
+        services.AddScoped<IAccountAdministration, AccountAdministrationService>();
 
         services.AddHealthChecks().AddCheck<DatabaseReadinessHealthCheck>(
             "database",

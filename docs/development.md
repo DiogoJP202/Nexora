@@ -1,6 +1,6 @@
 # Desenvolvimento local
 
-Execute os comandos deste guia na raiz do repositório. A Fase 1 disponibiliza infraestrutura e health checks; não oferece endpoints de autenticação ou de arquivos.
+Execute os comandos deste guia na raiz do repositório. A Fase 2 acrescenta autenticação e dispositivos à infraestrutura; endpoints de arquivos ainda não existem.
 
 ## SDK e dependências
 
@@ -63,6 +63,9 @@ O banco `nexora_dev` pertence à aplicação local. `nexora_test` e a role corre
 | `ConnectionStrings:Nexora` | User Secrets da API ou variável de ambiente. | Segredo fornecido pelo operador, fora do Git. |
 | `Storage:RootPath` | Caminho absoluto local, preferencialmente `%LOCALAPPDATA%\Nexora\storage`. | `/srv/nexora` como padrão versionado. |
 | `ConnectionStrings:NexoraTests` | User Secrets dos testes ou variável exclusiva da fixture. | Não usada pela aplicação. |
+| `DataProtection:KeyDirectory` | Opcional; por padrão, diretório `Nexora/keys` em LocalApplicationData do usuário do sistema. | Diretório permanente e restrito, fora da instalação e do storage de conteúdo. |
+| `DataProtection:CertificatePath` | Não necessário no Windows; desenvolvimento Linux permite key ring sem certificado. | Obrigatório em Linux fora de Development: PFX RSA protegido com chave privada. |
+| `DataProtection:CertificatePassword` | Segredo opcional para o PFX. | Fornecido fora do Git junto aos demais segredos. |
 
 A API utiliza os providers padrão do ASP.NET Core e acrescenta variáveis com prefixo `NEXORA_`. O provider adicional é carregado por último e pode sobrescrever os demais valores. Use dois underscores para hierarquia: `NEXORA_Storage__RootPath` e `NEXORA_ConnectionStrings__Nexora`. `NEXORA_STORAGE_PATH` não corresponde à configuração atual.
 
@@ -84,13 +87,17 @@ $env:NEXORA_Storage__RootPath = Join-Path $env:LOCALAPPDATA 'Nexora\storage'
 # NEXORA_ConnectionStrings__Nexora deve ser fornecida por seu ambiente local de segredos.
 ```
 
-A inicialização valida configuração sem abrir conexão de banco e sem criar diretórios. `Storage:RootPath` deve ser absoluto para o sistema operacional atual e não pode ser a raiz de um volume. A connection string deve informar Host, Database e Username. Não ativar `Log Parameters`, `Include Error Detail` nem `Persist Security Info`; a validação rejeita essas opções por exporem dados sensíveis.
+A validação de `Storage:RootPath` não cria diretórios: o caminho deve ser absoluto para o sistema operacional atual e não pode ser a raiz de um volume. A connection string deve informar Host, Database e Username. Não ativar `Log Parameters`, `Include Error Detail` nem `Persist Security Info`; a validação rejeita essas opções por exporem dados sensíveis.
+
+As chaves de autenticação usam Data Protection com ApplicationName estável `Nexora.Auth`. No Windows, o padrão é `%LOCALAPPDATA%\Nexora\keys`, com ACL restrita ao usuário atual e SYSTEM e proteção DPAPI do usuário. Um certificado configurado substitui a proteção DPAPI. O provider inicializa o diretório de chaves quando necessário; ele fica fora da instalação e do storage. Um override utiliza `NEXORA_DataProtection__KeyDirectory`, sempre com caminho absoluto e diferente da raiz de um volume.
+
+No desenvolvimento Linux, o diretório é restrito a modo `0700`, mas o key ring pode ficar sem criptografia de arquivo; isso é permitido apenas em Development. Em Linux fora de Development, configurar `NEXORA_DataProtection__CertificatePath` para um PFX RSA com chave privada e, se necessário, `NEXORA_DataProtection__CertificatePassword` por segredo. Proteja os arquivos do certificado e faça backup do certificado/chaves; não basta copiar o executável. Os [detalhes de autenticação](authentication.md) explicam recuperação e revogação.
 
 Um servidor PostgreSQL temporariamente indisponível deixa readiness em falha; configuração ausente ou inválida impede a aplicação de iniciar. Não imprimir connection strings em logs, issues ou comandos de diagnóstico compartilhados.
 
 ## Migrations explícitas
 
-A migration inicial configura o schema do Identity. Isso não cria um administrador nem implementa autenticação. Toda alteração de schema passa por migration versionada e revisão.
+A migration inicial configura Identity; a Fase 2 acrescenta dispositivos, sessões e refresh tokens. Aplicar migrations não cria administrador. Toda alteração de schema passa por migration versionada e revisão.
 
 Com a configuração da API de desenvolvimento disponível:
 
@@ -108,6 +115,24 @@ dotnet ef migrations add NomeDaAlteracao --project src/Nexora.Infrastructure --s
 
 Revise o SQL e o impacto de cada migration antes de aplicá-la. API e health checks nunca executam `Migrate` na inicialização. Em produção, migrations serão uma operação explícita do deploy com credencial apropriada, antes de disponibilizar a nova versão; não embutir uma senha de produção no comando ou no repositório.
 
+## Criar ou recuperar a conta administrativa
+
+Com PostgreSQL iniciado e migrations aplicadas, execute em um terminal interativo:
+
+```powershell
+dotnet run --project src/Nexora.Api -- bootstrap-admin
+```
+
+O comando pede email, senha e confirmação. A senha fica oculta, não é argumento do comando e não deve entrar em logs. A conta única não é criada automaticamente; um segundo bootstrap é recusado.
+
+Para recuperar localmente a senha da conta já existente:
+
+```powershell
+dotnet run --project src/Nexora.Api -- reset-admin-password
+```
+
+O reset pede a nova senha e sua confirmação sem eco. Ele revoga todas as sessões existentes. Não há endpoint HTTP de registro ou recuperação de senha. A passphrase deve ter entre 14 e 256 caracteres; não há exigência artificial de dígitos, maiúsculas ou símbolos.
+
 ## Executar e verificar a API
 
 ```powershell
@@ -124,7 +149,9 @@ Invoke-RestMethod http://127.0.0.1:5100/openapi/v1.json
 
 Live não depende de PostgreSQL. Ready verifica conexão e migrations pendentes com timeout de cinco segundos, retornando status genérico e `503` em falha. OpenAPI existe somente em Development; não há Swagger UI instalada. Respostas de erro utilizam Problem Details com código e identificador de rastreamento, sem detalhes internos.
 
-O HTTP em loopback serve somente ao desenvolvimento desta fundação. Antes de usar dados pessoais remotamente, as fases de autenticação, autorização, HTTPS/Tailscale e hardening devem estar concluídas. Deploy systemd de produção ainda não faz parte da Fase 1.
+O limite atual de corpo é 16 KiB, suficiente para autenticação. Não usar essa API para enviar arquivos; limites por rota de upload pertencem à Fase 4. Requisições de login e refresh não devem incluir um bearer antigo de sessão revogada; enviar somente seus corpos JSON.
+
+O HTTP em loopback serve ao desenvolvimento local. Fora de Development, `/api/*` exige HTTPS. O uso previsto é Tailscale Serve terminando TLS e encaminhando para loopback; Forwarded Headers só são aceitos de proxies loopback confiáveis. Funnel permanece desativado e grants restringem a tailnet. Deploy systemd e operação com dados pessoais ainda pertencem à Fase 7.
 
 ## Testes de integração
 
@@ -138,6 +165,8 @@ dotnet test Nexora.sln
 O bootstrap já registra o segredo de testes. Para executar após o setup, basta iniciar o cluster e rodar `dotnet test Nexora.sln`. A alternativa é `NEXORA_TEST_CONNECTION_STRING`, específica da fixture, com a connection string da role de testes. Esta variável não é a conexão usada pela API.
 
 Os testes HTTP e de configuração executam sem PostgreSQL. Quando nenhuma conexão de testes é fornecida, testes PostgreSQL aparecem como skipped com motivo explícito. Se a conexão foi fornecida, falhas de autenticação, banco indisponível, privilégio ausente ou migration incorreta resultam em testes falhos.
+
+Testes de autenticação usam Data Protection efêmero por padrão para não tocar as chaves pessoais do desenvolvedor. Contas/dispositivos criados por fixtures existem somente em seus bancos isolados; os testes não executam bootstrap no banco de desenvolvimento.
 
 Cada fixture cria um banco `nexora_it_<guid>` e aplica migrations nesse banco. A limpeza é restrita ao identificador criado pela própria fixture e a seu prefixo; nunca apontar testes à produção. Bancos que sobrarem após uma interrupção devem ser examinados pelo administrador e removidos somente quando for confirmado que pertencem à execução interrompida, sem comandos de exclusão por wildcard.
 
