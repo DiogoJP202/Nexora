@@ -2,7 +2,7 @@
 
 Nexora é uma nuvem privada para fotos, vídeos e arquivos pessoais, executada em um único servidor Arch Linux com aproximadamente 500 GB disponíveis. O MVP terá uma conta administrativa, acesso privado por Tailscale e uma API ASP.NET Core. O cliente mobile será uma etapa posterior.
 
-Este documento registra o desenho aprovado. As fases 1 e 2 cobrem fundação e autenticação. Modelos e fluxos de storage, uploads e mídia continuam previstos para as fases seguintes; não estão disponíveis na API atual.
+Este documento registra o desenho aprovado. As fases 1 a 3 entregam fundação, autenticação, modelos de conteúdo e armazenamento interno com deduplicação. Uploads, downloads e mídia por HTTP continuam previstos para as fases seguintes.
 
 Consulte [estado e próximas etapas](status-and-roadmap.md) para o inventário das entregas atuais, as pendências de cada fase e seus critérios de aceite.
 
@@ -19,7 +19,7 @@ Consulte [estado e próximas etapas](status-and-roadmap.md) para o inventário d
 
 ## Separação de responsabilidades
 
-A árvore abaixo é a estrutura alvo. Worker e testes de domínio serão criados quando tiverem comportamento a implementar; a Fase 1 mantém apenas os projetos necessários à fundação.
+A árvore abaixo é a estrutura alvo. Os quatro projetos centrais e os dois projetos de testes já existem; Worker entra na Fase 4 e o cliente mobile na Fase 8.
 
 ```text
 Nexora.sln
@@ -49,16 +49,16 @@ Não introduzir repositório genérico, mediator, event bus ou camadas adicionai
 | AuthSession | Sessão autenticada vinculada ao usuário e dispositivo, com expiração e revogação. |
 | RefreshToken | Hash do token, sessão, expiração, consumo e sucessor para rotação e detecção de reutilização; revogação controlada pela sessão. |
 | Blob | Conteúdo imutável: SHA-256, tamanho, chave interna, MIME detectado e estado de publicação. |
-| Asset | Referência do proprietário ao Blob: nome original, upload, data da foto, favorito e lixeira. |
+| Asset | Referência do proprietário ao Blob: nome original, upload, favorito e lixeira; data da foto será acrescentada na Fase 5. |
 | UploadSession | Sessão retomável, tamanho esperado, chunks, estado, atividade e resultado. |
 | UploadChunk | Índice, tamanho, SHA-256 e localização interna de um chunk confirmado. |
 | BackgroundJob | Trabalho durável, tentativas, próxima execução e lease do worker. |
 
-Identity, Device, AuthSession e RefreshToken pertencem à Fase 2. As entidades de conteúdo, upload e jobs serão introduzidas nas fases de storage e arquivos.
+Identity, Device, AuthSession e RefreshToken estão implementados na Fase 2. Blob e Asset estão implementados na Fase 3. UploadSession, UploadChunk e BackgroundJob entrarão na Fase 4.
 
-Separar Blob e Asset permitirá deduplicar bytes sem acoplar nome, favorito ou exclusão à cópia física. SHA-256 será calculado pelo servidor e terá unicidade no Blob. Um Asset por `(OwnerId, BlobId)` evitará duplicatas lógicas mesmo em conclusões concorrentes.
+Blob e Asset separados permitem deduplicar bytes sem acoplar nome, favorito ou exclusão à cópia física. SHA-256 é calculado pelo servidor e tem unicidade no Blob. Um Asset por `(OwnerId, BlobId)` evita duplicatas lógicas mesmo em conclusões concorrentes.
 
-Enviar novamente conteúdo idêntico retornará o Asset ativo existente, sem alterar seus metadados. Se o Asset estiver na lixeira, retornar um conflito que exige restauração explícita. Concluir novamente a mesma UploadSession retornará seu resultado anterior.
+A importação interna de conteúdo idêntico retorna o Asset ativo existente, sem alterar seus metadados. Se estiver na lixeira, retorna `AssetInTrash`, exigindo restauração explícita. Na Fase 4, concluir novamente a mesma UploadSession retornará seu resultado anterior.
 
 Não manter `ReferenceCount` persistido inicialmente: consultar referências incluindo a lixeira evita divergência de contadores. A Fase 5 acrescenta dimensões, orientação e data extraída da imagem. Câmera e geolocalização ficam para um incremento posterior à Fase 5. Preservar datas EXIF sem fuso como dados locais de origem, sem adivinhar que representam UTC; timestamps operacionais da aplicação são UTC.
 
@@ -104,7 +104,7 @@ A interface HTTP prevista cria a sessão, recebe chunks numerados, informa o pro
 2. Receber cada chunk em streaming limitado, escrevendo uma tentativa temporária independente. Validar índice, quantidade de bytes e hash antes de confirmar o chunk no banco.
 3. Um reenvio com mesmo índice e conteúdo é idempotente. Conteúdo diferente para um índice confirmado é conflito. O progresso enumera somente chunks confirmados.
 4. A conclusão verifica todos os chunks e muda a sessão de `Open` para `Finalizing`, gravando um job na mesma transação. Retornar `202 Accepted`, sem montar um arquivo grande dentro da requisição HTTP.
-5. O worker monta o arquivo em streaming, valida tamanho e hash final e resolve a deduplicação. Um Blob `Ready` pode ser reutilizado; outro Blob em publicação ou exclusão exige retry.
+5. O worker monta o arquivo em streaming, valida tamanho e hash final e resolve a deduplicação. Um Blob `Ready` pode ser reutilizado após verificar seu conteúdo; `Staging` permite retomar publicação da mesma geração; `Deleting` impede criação de referência até terminar a coleta.
 6. Para conteúdo novo, persistir a intenção `Staging` e sua chave física antes de publicar o arquivo. Só depois da publicação, marcar Blob `Ready`, criar ou resolver o Asset, concluir a sessão e agendar processamento de mídia na mesma transação.
 7. Remover chunks e arquivos temporários após a confirmação. A limpeza é idempotente e pode ser repetida após reinício.
 
@@ -133,11 +133,13 @@ Reservar aproximadamente `2 × tamanho declarado` na criação da sessão, seria
 
 Chaves internas são opacas e imutáveis, com identificador distinto por geração, por exemplo `blobs/ab/cd/<blob-id>`. SHA-256 identifica conteúdo no banco; uma chave física por geração impede uma limpeza antiga de remover um novo upload do mesmo hash.
 
-O contrato de IBlobStorage deve receber/devolver Streams e permitir publicação imutável, leitura completa/parcial, consulta de informações do objeto e exclusão idempotente. Spool e chunks pertencem a uma abstração separada de staging. Rename é uma otimização interna do storage local, sem virar requisito da interface; um futuro storage S3 poderá implementar publicação por PUT/multipart sem reescrever os casos de uso.
+`IBlobStorage` recebe/devolve Streams e oferece publicação imutável, leitura, consulta de tamanho e exclusão idempotente. `ITemporaryStorage` separa temporários, limite real de bytes e hashing; suporte HTTP Range entra na Fase 4. Rename fica interno ao adaptador local, sem virar requisito da interface; um futuro storage S3 poderá implementar publicação por PUT/multipart sem reescrever os casos de uso.
 
-PostgreSQL e filesystem não compartilham uma transação. O storage previsto utilizará intenção persistida, publicação local sem sobrescrita e reconciliação após reinício. A recuperação examinará sessões em finalização e Blobs Staging: remontar antes da publicação, concluir após verificar conteúdo publicado ou registrar uma falha explícita quando os bytes esperados estiverem ausentes. Nunca apagar metadados silenciosamente para esconder inconsistências.
+PostgreSQL e filesystem não compartilham uma transação. A Fase 3 persiste a intenção `Staging` antes de publicar sem sobrescrita, depois confirma `Ready` e resolve o Asset em outra transação. Advisory locks por hash e locks de linha coordenam conclusões concorrentes. Um reenvio pode verificar/publicar a mesma geração e concluir uma operação interrompida. Blob Ready ausente ou corrompido gera falha de integridade.
 
-Manter `temp` e `blobs` no mesmo filesystem permite rename local atômico, mas rename isolado não assegura durabilidade. Ao implementar storage, o adaptador local precisará fazer flush do arquivo e sincronizar os diretórios Linux envolvidos antes de confirmar a publicação durável no banco. Essa responsabilidade fica no adaptador, sem contaminar a interface de storage. Até a Fase 2, a aplicação apenas valida o caminho configurado e não implementa esse fluxo.
+Os adaptadores locais mantêm `temp` e `blobs` no mesmo filesystem, fazem flush do arquivo e publicam sem sobrescrita. No Linux, usam `renameat2(RENAME_NOREPLACE)` e sincronizam diretórios com `fsync`, recusando movimento entre mounts. Caminhos não canônicos, symlinks e junctions são rejeitados; diretórios e arquivos recebem permissões restritas. Essa responsabilidade fica no adaptador, sem contaminar a interface de storage.
+
+Reconciliação automática após reinício entra na Fase 4: examinar sessões em finalização, Blobs Staging e temporários, concluir após verificar conteúdo ou registrar falha explícita. A Fase 3 testa falha injetada e recuperação por reenvio no Windows; execução nativa e persistência após reinício no Arch continuam pendentes. O [guia de armazenamento](storage.md) detalha contratos, publicação e limites de recuperação.
 
 Reconciliação recupera operações interrompidas; não recria bytes perdidos por falha física. Backup e teste de restauração continuam necessários para proteger o conteúdo diante de falhas de hardware e perda de dados.
 
@@ -166,9 +168,11 @@ Após o período configurável de retenção, o worker removerá o Asset. Para r
 
 Nexora oferece armazenamento; uma única cópia no servidor não é backup. Documentar backup conjunto de PostgreSQL, storage, configuração e chaves, preferencialmente pausando gravações/workers ou usando uma estratégia de snapshot consistente. Testar restauração em ambiente isolado. A integração com restic/borg fica fora do escopo atual; a Fase 7 prevê procedimentos manuais documentados.
 
-## Testes que orientam as próximas fases
+## Testes implementados e prioridades seguintes
 
 Na autenticação, verificar expiração de access/session, rotação concorrente, reutilização de refresh, revogação imediata de sessão/dispositivo e preservação de tokens ao reiniciar com as mesmas chaves de Data Protection.
+
+A Fase 3 verifica regras de Blob/Asset, chaves canônicas, hashing e cancelamento, streams sem seek, publicação imutável, limites de bytes, traversal/junctions, deduplicação entre proprietários e concorrente, conflito na lixeira, corrupção e retomada de Staging por reenvio. Testes de filesystem e banco usam fixtures isoladas.
 
 Priorizar autorização entre proprietários, traversal, limites de upload, chunks repetidos/conflitantes/fora de ordem, retomada, hash, deduplicação concorrente, conclusão repetida, expiração durante upload e disco cheio. Introduzir fault injection nas fronteiras filesystem/banco, recuperação de Staging, lease expirado, GC contra upload e purge contra restauração. Testar falha de thumbnails com original ainda acessível.
 
@@ -188,7 +192,7 @@ Na Fase 1, verificar configuração, health checks, acesso PostgreSQL e migratio
 | 7 — Operação | Deploy systemd/Arch, HTTPS/Tailscale, revisão de segurança, observabilidade e procedimentos de backup/restauração. |
 | 8 — Mobile | Contrato de sincronização, registro de mudanças e cliente MAUI Android; iOS posteriormente, respeitando as restrições de background de cada plataforma. |
 
-Segurança acompanha cada funcionalidade desde sua criação; a Fase 7 verifica e fecha a operação de produção. A etapa atual termina na Fase 2. O próximo incremento trata dos modelos/storage, sem antecipar endpoints de arquivos ou cliente mobile.
+Segurança acompanha cada funcionalidade desde sua criação; a Fase 7 verifica e fecha a operação de produção. A etapa atual termina na Fase 3. O próximo incremento disponibiliza uploads retomáveis, Worker durável, biblioteca básica, downloads e capacidade por API.
 
 ## Referências técnicas
 

@@ -1,8 +1,8 @@
 # Nexora — estado atual e próximas etapas
 
-Atualizado em **5 de outubro de 2026**. Estado do código conferido no commit `107d7df`.
+Atualizado em **6 de outubro de 2026**. Estado do código conferido no commit `435e051`.
 
-O Nexora já tem a fundação da API e autenticação implementadas. A próxima entrega é a Fase 3, que cria os modelos e o armazenamento de conteúdo. Uploads, biblioteca e clientes ainda dependem das fases seguintes.
+O Nexora já tem fundação, autenticação e armazenamento interno com deduplicação implementados. A próxima entrega é a Fase 4, que disponibiliza upload retomável, Worker e arquivos por API. Biblioteca completa, imagens e clientes dependem das fases seguintes.
 
 ## 1. O que o projeto pretende ser
 
@@ -17,8 +17,8 @@ O desenvolvimento começa pela API. O cliente mobile virá depois, inicialmente 
 - Monólito modular em .NET 10: API, Application, Domain e Infrastructure; Worker separado quando houver processamento demorado.
 - Uma conta administrativa, sem cadastro público; biblioteca plana no MVP.
 - PostgreSQL para metadados e estados; filesystem para originais, derivados e temporários.
-- Blob representará os bytes imutáveis; Asset representará o item da biblioteca e suas permissões, nome e lixeira.
-- Conteúdo idêntico reutilizará o Asset existente, preservando seus metadados. Um item na lixeira exigirá restauração explícita.
+- Blob representa os bytes imutáveis; Asset representa o item da biblioteca e suas permissões, nome e lixeira.
+- A importação interna de conteúdo idêntico reutiliza o Asset existente, preservando seus metadados. Um item na lixeira exige restauração explícita; os endpoints correspondentes serão introduzidos nas próximas fases.
 - O servidor será confiável e poderá ler os originais para processamento.
 - Thumbnails e previews começarão por JPEG, PNG e WebP. Outros formatos permanecerão acessíveis como originais quando o upload estiver implementado.
 - Segurança, testes e recuperação acompanharão cada fase; operação em produção será validada na Fase 7.
@@ -32,8 +32,8 @@ Os detalhes técnicos e as razões dessas decisões estão em [architecture.md](
 | 0 — Arquitetura | Concluída | Modelo, contratos, decisões e sequência de desenvolvimento documentados. |
 | 1 — Fundação | Concluída | Solution, configuração, PostgreSQL, migrations Identity e health checks. |
 | 2 — Identidade | Concluída | Administração local da conta, login, sessões, refresh e dispositivos. |
-| 3 — Armazenamento | Próxima; não iniciada | Blob/Asset, adaptador local, streaming, SHA-256 e deduplicação. |
-| 4 — Arquivos utilizáveis | Pendente | Upload retomável, Worker durável, biblioteca básica, download e capacidade. |
+| 3 — Armazenamento | Concluída | Blob/Asset, adaptador local, streaming, SHA-256 e deduplicação interna. |
+| 4 — Arquivos utilizáveis | Próxima; não iniciada | Upload retomável, Worker durável, biblioteca básica, download e capacidade. |
 | 5 — Imagens | Pendente | Metadados, orientação, thumbnails, previews e estado de processamento. |
 | 6 — Biblioteca | Pendente | Timeline, favoritos, lixeira, restauração e limpeza definitiva segura. |
 | 7 — Operação | Pendente | Arch/systemd, Tailscale/HTTPS, revisão de segurança e restauração de backup. |
@@ -74,6 +74,22 @@ Não há estimativas de datas ou percentual de conclusão. As fases têm tamanho
 
 O suporte a configurações de produção está no código. O deploy Arch, os serviços systemd, as grants Tailscale e os procedimentos de backup/restauração ainda serão preparados e verificados na Fase 7.
 
+### Fase 3 — Armazenamento e identidade dos arquivos
+
+- [x] Blob e Asset com estados, regras de domínio, vínculos, índices e migration `20261006114248_ContentBlobsAssets`.
+- [x] SHA-256 único em Blob e `(OwnerId, BlobId)` único em Asset, incluindo itens na lixeira.
+- [x] `IBlobStorage` para publicação imutável, leitura por stream, informações e exclusão idempotente; temporários separados em `ITemporaryStorage`.
+- [x] Adaptadores locais com chaves internas por geração, diretórios privados, confinamento e rejeição de traversal, symlinks/junctions.
+- [x] Streaming com buffers limitados, tamanho real, cancelamento e SHA-256 calculado no servidor; assinatura preliminar de JPEG, PNG e WebP, sem decodificação.
+- [x] Publicação sem sobrescrita e sincronização de gravações; intenção Staging persistida antes do filesystem, confirmação Ready e Asset em transação posterior.
+- [x] Deduplicação entre proprietários e concorrente, preservando nome, upload e favorito do Asset existente; lixeira retorna conflito identificável.
+- [x] Recuperação por reenvio após falha de publicação, preservando a mesma geração; Blob Ready ausente/corrompido é recusado.
+- [x] `Nexora.UnitTests` e testes de integração de storage/persistência, incluindo falhas de leitura, limpeza e publicação.
+
+**Aceite verificado localmente:** o adaptador publica, lê e exclui; duplicatas preservam identidade; conflito na lixeira e paths maliciosos são tratados; concorrência e retomada de Staging estão testadas no Windows com PostgreSQL nativo. Não há novos endpoints de arquivos nesta fase.
+
+Os [contratos de armazenamento](storage.md) detalham a entrega. Reconciliação automática, jobs duráveis, reservas e testes de reinício dos processos entram na Fase 4. Execução nativa Linux e persistência após reinício no filesystem Arch continuam pendentes; testes com falha injetada não equivalem a simular queda de energia.
+
 ### Superfície HTTP disponível
 
 | Método | Rota | Finalidade |
@@ -95,28 +111,15 @@ Os contratos de autenticação, códigos de erro e instruções de recuperação
 | --- | --- |
 | Fundação entregue | Commit `f0b48d7`. |
 | Identidade entregue | Commit `107d7df`. |
-| Última validação da implementação, em 5 de outubro de 2026 | Build Release sem avisos; 44 testes aprovados, zero falhas e zero ignorados. |
-| Verificação HTTP local da Fase 2 | Live, ready e OpenAPI responderam `200`; dispositivos sem autenticação `401`; rota desconhecida `404`. |
+| Armazenamento interno entregue | Commit `435e051`; migration aplicada ao banco local de desenvolvimento. |
+| Última validação da implementação, em 6 de outubro de 2026 | Restore em locked mode; build Release sem avisos/erros; 95 testes aprovados: 29 unitários e 66 de integração, zero falhas e zero ignorados. |
+| Verificação HTTP local com a migration da Fase 3 | Live, ready e OpenAPI responderam `200`; dispositivos sem autenticação `401`; `/api/uploads`, ainda não implementada, `404`. |
 
-Esses resultados são o registro da entrega da Fase 2. Para verificar uma revisão posterior, execute os comandos de [development.md](development.md) e registre o novo resultado.
+Esses resultados são o registro da entrega da Fase 3 no Windows. Para verificar uma revisão posterior, execute os comandos de [development.md](development.md) e registre o novo resultado.
 
 ## 4. Etapas que faltam
 
 As listas abaixo são trabalho planejado. Cada fase só será concluída após implementar suas entregas e verificar os critérios de aceite.
-
-### Fase 3 — Armazenamento e identidade dos arquivos
-
-Depende da fundação e da identidade já entregues.
-
-- [ ] Criar Blob e Asset, seus estados, vínculos, índices e migrations.
-- [ ] Garantir unicidade de SHA-256 em Blob e de `(OwnerId, BlobId)` em Asset, incluindo itens na lixeira.
-- [ ] Definir `IBlobStorage` para publicação imutável, leitura por stream, informações do objeto e exclusão idempotente; separar a abstração de temporários.
-- [ ] Implementar o adaptador local com chaves internas por geração física, confinamento de caminhos e publicação sem sobrescrita.
-- [ ] Calcular SHA-256 em streaming e implementar a deduplicação preservando nome e metadados do Asset existente.
-- [ ] Representar `DeletedAt` para preservar a regra de conflito de duplicata na lixeira; as ações HTTP de lixeira entram na Fase 6.
-- [ ] Introduzir `Nexora.UnitTests` para as primeiras regras de arquivos e testes de integração do adaptador/persistência.
-
-**Aceite:** conteúdo pode ser publicado, lido e excluído pelo adaptador; duplicatas reutilizam a identidade existente; conflito na lixeira é identificável; caminhos maliciosos são recusados; corridas de deduplicação e estados de publicação têm comportamento testado. Esta fase prepara o armazenamento antes dos endpoints de arquivos.
 
 ### Fase 4 — Arquivos utilizáveis por API
 
@@ -191,7 +194,7 @@ Depende de uma API estável e da operação do backend.
 
 ## 5. Parâmetros previstos para arquivos
 
-Estes valores ainda serão implementados nas fases de arquivos, imagens e lixeira. Hoje, validar `Storage:RootPath` não cria um serviço de armazenamento nem aplica essas quotas.
+Estes valores ainda serão implementados nas fases de arquivos, imagens e lixeira. O storage interno já limita a escrita ao tamanho declarado por operação; não aplica quotas globais, reservas, expiração ou esses defaults. Validar `Storage:RootPath` e iniciar a API não cria os diretórios de conteúdo.
 
 | Parâmetro | Default planejado |
 | --- | --- |
@@ -229,3 +232,4 @@ Ao concluir um incremento:
 | [Arquitetura](architecture.md) | Consultar decisões, modelo e fluxos projetados. |
 | [Desenvolvimento](development.md) | Preparar o ambiente, aplicar migrations e executar a API/testes. |
 | [Autenticação](authentication.md) | Integrar os contratos já disponíveis e administrar a conta localmente. |
+| [Armazenamento](storage.md) | Consultar importação interna, deduplicação, publicação e recuperação por reenvio. |

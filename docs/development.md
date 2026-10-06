@@ -1,6 +1,6 @@
 # Desenvolvimento local
 
-Execute os comandos deste guia na raiz do repositório. A Fase 2 acrescenta autenticação e dispositivos à infraestrutura; endpoints de arquivos ainda não existem.
+Execute os comandos deste guia na raiz do repositório. As fases 1 a 3 entregam fundação, autenticação e armazenamento interno com deduplicação; endpoints de arquivos ainda não existem.
 
 ## SDK e dependências
 
@@ -87,7 +87,7 @@ $env:NEXORA_Storage__RootPath = Join-Path $env:LOCALAPPDATA 'Nexora\storage'
 # NEXORA_ConnectionStrings__Nexora deve ser fornecida por seu ambiente local de segredos.
 ```
 
-A validação de `Storage:RootPath` não cria diretórios: o caminho deve ser absoluto para o sistema operacional atual e não pode ser a raiz de um volume. A connection string deve informar Host, Database e Username. Não ativar `Log Parameters`, `Include Error Detail` nem `Persist Security Info`; a validação rejeita essas opções por exporem dados sensíveis.
+A validação de `Storage:RootPath` não cria diretórios: o caminho deve ser absoluto para o sistema operacional atual e não pode ser a raiz de um volume. Os adaptadores da Fase 3 criam diretórios privados ao executar uma escrita e recusam symlinks/junctions. A connection string deve informar Host, Database e Username. Não ativar `Log Parameters`, `Include Error Detail` nem `Persist Security Info`; a validação rejeita essas opções por exporem dados sensíveis.
 
 As chaves de autenticação usam Data Protection com ApplicationName estável `Nexora.Auth`. No Windows, o padrão é `%LOCALAPPDATA%\Nexora\keys`, com ACL restrita ao usuário atual e SYSTEM e proteção DPAPI do usuário. Um certificado configurado substitui a proteção DPAPI. O provider inicializa o diretório de chaves quando necessário; ele fica fora da instalação e do storage. Um override utiliza `NEXORA_DataProtection__KeyDirectory`, sempre com caminho absoluto e diferente da raiz de um volume.
 
@@ -97,7 +97,7 @@ Um servidor PostgreSQL temporariamente indisponível deixa readiness em falha; c
 
 ## Migrations explícitas
 
-A migration inicial configura Identity; a Fase 2 acrescenta dispositivos, sessões e refresh tokens. Aplicar migrations não cria administrador. Toda alteração de schema passa por migration versionada e revisão.
+A migration inicial configura Identity; a Fase 2 acrescenta dispositivos, sessões e refresh tokens; `20261006114248_ContentBlobsAssets`, da Fase 3, acrescenta Blobs e Assets. Aplicar migrations não cria administrador. Toda alteração de schema passa por migration versionada e revisão.
 
 Com a configuração da API de desenvolvimento disponível:
 
@@ -153,7 +153,13 @@ O limite atual de corpo é 16 KiB, suficiente para autenticação. Não usar ess
 
 O HTTP em loopback serve ao desenvolvimento local. Fora de Development, `/api/*` exige HTTPS. O uso previsto é Tailscale Serve terminando TLS e encaminhando para loopback; Forwarded Headers só são aceitos de proxies loopback confiáveis. Funnel permanece desativado e grants restringem a tailnet. Deploy systemd e operação com dados pessoais ainda pertencem à Fase 7.
 
-## Testes de integração
+## Testes unitários e de integração
+
+As regras de domínio, chaves e hashing podem ser verificadas sem PostgreSQL:
+
+```powershell
+dotnet test tests/Nexora.UnitTests -c Release
+```
 
 User Secrets dos testes usam `Nexora.IntegrationTests.Development`:
 
@@ -164,10 +170,14 @@ dotnet test Nexora.sln
 
 O bootstrap já registra o segredo de testes. Para executar após o setup, basta iniciar o cluster e rodar `dotnet test Nexora.sln`. A alternativa é `NEXORA_TEST_CONNECTION_STRING`, específica da fixture, com a connection string da role de testes. Esta variável não é a conexão usada pela API.
 
-Os testes HTTP e de configuração executam sem PostgreSQL. Quando nenhuma conexão de testes é fornecida, testes PostgreSQL aparecem como skipped com motivo explícito. Se a conexão foi fornecida, falhas de autenticação, banco indisponível, privilégio ausente ou migration incorreta resultam em testes falhos.
+Os testes unitários, HTTP, de configuração e filesystem executam sem PostgreSQL. Quando nenhuma conexão de testes é fornecida, testes PostgreSQL aparecem como skipped com motivo explícito. Se a conexão foi fornecida, falhas de autenticação, banco indisponível, privilégio ausente ou migration incorreta resultam em testes falhos.
 
 Testes de autenticação usam Data Protection efêmero por padrão para não tocar as chaves pessoais do desenvolvedor. Contas/dispositivos criados por fixtures existem somente em seus bancos isolados; os testes não executam bootstrap no banco de desenvolvimento.
 
 Cada fixture cria um banco `nexora_it_<guid>` e aplica migrations nesse banco. A limpeza é restrita ao identificador criado pela própria fixture e a seu prefixo; nunca apontar testes à produção. Bancos que sobrarem após uma interrupção devem ser examinados pelo administrador e removidos somente quando for confirmado que pertencem à execução interrompida, sem comandos de exclusão por wildcard.
+
+Testes de conteúdo usam diretórios próprios sob a pasta temporária do sistema, com limpeza restrita ao caminho gerado pela fixture. Verificam streams sem seek, publicação sem sobrescrita, limites reais de bytes, cancelamento, junctions, deduplicação concorrente e recuperação de Staging por reenvio. Não usam o storage pessoal configurado na API.
+
+O [guia de armazenamento](storage.md) descreve os contratos internos e os limites desta entrega. Reservas, quotas e reconciliação automática ficam para a Fase 4. Os caminhos nativos de publicação e sincronização Linux precisam de validação no Arch; os resultados locais desta fase são de Windows.
 
 Esses comandos descrevem a validação disponível; a documentação não representa um relatório de testes de uma execução específica.
