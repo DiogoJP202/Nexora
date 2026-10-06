@@ -7,11 +7,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Nexora.Application.Authentication;
+using Nexora.Application.Content;
+using Nexora.Application.Storage;
 using Nexora.Infrastructure.Authentication;
 using Nexora.Infrastructure.Configuration;
+using Nexora.Infrastructure.Content;
 using Nexora.Infrastructure.HealthChecks;
 using Nexora.Infrastructure.Identity;
 using Nexora.Infrastructure.Persistence;
+using Nexora.Infrastructure.Storage;
 
 namespace Nexora.Infrastructure;
 
@@ -72,6 +76,10 @@ public static class DependencyInjection
         services.AddSingleton<DummyPasswordVerifier>();
         services.AddScoped<IAuthenticationService, AuthenticationService>();
         services.AddScoped<IAccountAdministration, AccountAdministrationService>();
+        services.AddSingleton<IBlobStorage, LocalFileBlobStorage>();
+        services.AddSingleton<ITemporaryStorage, LocalFileTemporaryStorage>();
+        services.AddScoped<IContentCatalog, PostgresContentCatalog>();
+        services.AddScoped<IAssetIngestionService, AssetIngestionService>();
 
         services.AddHealthChecks().AddCheck<DatabaseReadinessHealthCheck>(
             "database",
