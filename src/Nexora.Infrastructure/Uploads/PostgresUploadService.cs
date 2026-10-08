@@ -7,6 +7,7 @@ using Nexora.Application.Storage;
 using Nexora.Application.Uploads;
 using Nexora.Domain.Jobs;
 using Nexora.Domain.Content;
+using Nexora.Domain.Images;
 using Nexora.Domain.Uploads;
 using Nexora.Infrastructure.Authentication;
 using Nexora.Infrastructure.Configuration;
@@ -53,7 +54,8 @@ public sealed class PostgresUploadService(NexoraDbContext db, ITemporaryStorage 
         var activeCount = await db.UploadSessions.CountAsync(item => item.OwnerId == ownerId
             && (item.State == UploadState.Open || item.State == UploadState.Finalizing), cancellationToken);
         if (activeCount >= settings.MaximumOpenUploadsPerOwner) throw Refuse(409, "upload_limit_reached");
-        var reserved = await db.UploadSessions.SumAsync(item => item.ReservedBytes, cancellationToken);
+        var reserved = checked(await db.UploadSessions.SumAsync(item => item.ReservedBytes, cancellationToken)
+            + await db.BlobImages.SumAsync(item => item.ReservedBytes, cancellationToken));
         var usage = await usageReader.ReadAsync(cancellationToken);
         if (usage.AvailableBytes < 0 || usage.TemporaryBytes < 0) throw Refuse(503, "storage_unavailable");
         if (reserved > settings.MaximumReservedBytes || upload.ReservedBytes > settings.MaximumReservedBytes - reserved
@@ -240,7 +242,11 @@ public sealed class PostgresUploadService(NexoraDbContext db, ITemporaryStorage 
         if (upload.ResultAssetId is not null)
             result = await db.Assets.AsNoTracking().Where(asset => asset.Id == upload.ResultAssetId && asset.OwnerId == upload.OwnerId)
                 .Select(asset => new AssetSnapshot(asset.Id, asset.OriginalName, asset.Blob.Size, asset.Blob.DetectedMimeType,
-                    asset.UploadedAt, asset.IsFavorite, asset.DeletedAt)).SingleOrDefaultAsync(cancellationToken);
+                    asset.UploadedAt, asset.IsFavorite, asset.DeletedAt,
+                    asset.Blob.Image == null ? null : new ImageSnapshot(asset.Blob.Image.State, asset.Blob.Image.Width,
+                        asset.Blob.Image.Height, asset.Blob.Image.CapturedAtLocal, asset.Blob.Image.CapturedAtUtc,
+                        asset.Blob.Image.ProcessedAt, asset.Blob.Image.State == ImageProcessingState.Ready,
+                        asset.Blob.Image.State == ImageProcessingState.Ready, asset.Blob.Image.FailureCode))).SingleOrDefaultAsync(cancellationToken);
         return new UploadSnapshot(upload.Id, upload.OriginalName, upload.ExpectedLength, upload.ChunkSize, upload.ChunkCount,
             upload.State, confirmed, upload.CreatedAt, upload.LastActivityAt, result, upload.FailureCode,
             job is null ? null : new UploadOperationSummary(job.Id, job.State, job.Attempts, job.FailureCode));

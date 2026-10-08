@@ -22,20 +22,20 @@ public sealed class PostgresUploadWorkStore(NexoraDbContext db, ITrackedTemporar
     public async Task<UploadWorkItem?> ClaimAsync(CancellationToken cancellationToken)
     {
         var now = clock.GetUtcNow();
-        var candidates = await db.BackgroundJobs.AsNoTracking().Where(job =>
+        var candidates = await db.BackgroundJobs.AsNoTracking().Where(job => job.Kind == "FinalizeUpload" && (
                 (job.State == BackgroundJobState.Pending && job.NextAttemptAt <= now)
-                || (job.State == BackgroundJobState.Running && job.LeaseExpiresAt <= now))
+                || (job.State == BackgroundJobState.Running && job.LeaseExpiresAt <= now)))
             .OrderBy(job => job.NextAttemptAt).ThenBy(job => job.Id)
             .Select(job => new { job.Id, job.UploadSessionId }).Take(32).ToListAsync(cancellationToken);
         foreach (var candidate in candidates)
         {
             db.ChangeTracker.Clear();
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
-            if (!await UploadTransactionLock.TryAcquireAsync(db, candidate.UploadSessionId, cancellationToken)) continue;
+            if (!await UploadTransactionLock.TryAcquireAsync(db, candidate.UploadSessionId!.Value, cancellationToken)) continue;
             var job = await db.BackgroundJobs.FromSqlInterpolated($"SELECT * FROM \"BackgroundJobs\" WHERE \"Id\" = {candidate.Id} FOR UPDATE SKIP LOCKED")
                 .SingleOrDefaultAsync(cancellationToken);
             if (job is null) continue;
-            var upload = await UploadTransactionLock.RowAsync(db, candidate.UploadSessionId, cancellationToken);
+            var upload = await UploadTransactionLock.RowAsync(db, candidate.UploadSessionId!.Value, cancellationToken);
             now = clock.GetUtcNow();
             if (upload is null || upload.State != UploadState.Finalizing) continue;
             var eligible = (job.State == BackgroundJobState.Pending && job.NextAttemptAt <= now)

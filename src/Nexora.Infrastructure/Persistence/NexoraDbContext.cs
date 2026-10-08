@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Nexora.Domain.Authentication;
 using Nexora.Domain.Content;
 using Nexora.Domain.Jobs;
+using Nexora.Domain.Images;
 using Nexora.Domain.Uploads;
 using Nexora.Infrastructure.Identity;
 
@@ -16,6 +17,7 @@ public sealed class NexoraDbContext(DbContextOptions<NexoraDbContext> options)
     public DbSet<AuthSession> AuthSessions => Set<AuthSession>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Blob> Blobs => Set<Blob>();
+    public DbSet<BlobImage> BlobImages => Set<BlobImage>();
     public DbSet<Asset> Assets => Set<Asset>();
     public DbSet<UploadSession> UploadSessions => Set<UploadSession>();
     public DbSet<UploadChunk> UploadChunks => Set<UploadChunk>();

@@ -1,4 +1,5 @@
 using Nexora.Domain.Content;
+using Nexora.Domain.Images;
 
 namespace Nexora.Application.Content;
 
@@ -8,7 +9,10 @@ public sealed record BlobDescriptor(Guid Id, string Sha256, long Size, string De
     BlobStorageKey StorageKey, BlobState State);
 
 public sealed record AssetSnapshot(Guid Id, string OriginalName, long Size, string DetectedMimeType,
-    DateTimeOffset UploadedAt, bool IsFavorite, DateTimeOffset? DeletedAt);
+    DateTimeOffset UploadedAt, bool IsFavorite, DateTimeOffset? DeletedAt, ImageSnapshot? Image = null);
+
+public sealed record ImageSnapshot(ImageProcessingState State, int? Width, int? Height, DateTime? CapturedAtLocal,
+    DateTimeOffset? CapturedAtUtc, DateTimeOffset? ProcessedAt, bool HasThumbnail, bool HasPreview, string? FailureCode);
 
 public enum AssetImportStatus { Created, Reused, AssetInTrash, BlobUnavailable }
 

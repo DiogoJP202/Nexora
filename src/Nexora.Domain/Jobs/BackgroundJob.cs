@@ -1,4 +1,5 @@
 using Nexora.Domain.Uploads;
+using Nexora.Domain.Content;
 
 namespace Nexora.Domain.Jobs;
 
@@ -19,7 +20,8 @@ public sealed class BackgroundJob
     }
 
     public Guid Id { get; private set; }
-    public Guid UploadSessionId { get; private set; }
+    public Guid? UploadSessionId { get; private set; }
+    public Guid? BlobId { get; private set; }
     public string Kind { get; private set; } = "FinalizeUpload";
     public BackgroundJobState State { get; private set; } = BackgroundJobState.Pending;
     public int Attempts { get; private set; }
@@ -29,7 +31,19 @@ public sealed class BackgroundJob
     public Guid? LeaseToken { get; private set; }
     public DateTimeOffset? LeaseExpiresAt { get; private set; }
     public string? FailureCode { get; private set; }
-    public UploadSession Upload { get; private set; } = null!;
+    public UploadSession? Upload { get; private set; }
+    public Blob? Blob { get; private set; }
+
+    public static BackgroundJob ForImage(Guid id, Guid blobId, DateTimeOffset createdAt, int maximumAttempts)
+    {
+        var job = new BackgroundJob(id, blobId, createdAt, maximumAttempts)
+        {
+            UploadSessionId = null,
+            BlobId = blobId,
+            Kind = "ProcessImage"
+        };
+        return job;
+    }
 
     public bool HasLease(Guid token, DateTimeOffset now)
         => State == BackgroundJobState.Running && LeaseToken == token && LeaseExpiresAt > now;

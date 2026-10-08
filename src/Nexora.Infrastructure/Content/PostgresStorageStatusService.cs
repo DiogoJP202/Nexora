@@ -14,6 +14,8 @@ public sealed class PostgresStorageStatusService(NexoraDbContext db, IStorageUsa
             .Select(asset => (long?)asset.Blob.Size).SumAsync(cancellationToken) ?? 0;
         var reserved = await db.UploadSessions.AsNoTracking().Select(upload => (long?)upload.ReservedBytes)
             .SumAsync(cancellationToken) ?? 0;
+        reserved = checked(reserved + (await db.BlobImages.AsNoTracking().Select(image => (long?)image.ReservedBytes)
+            .SumAsync(cancellationToken) ?? 0));
         var physical = await usageReader.ReadAsync(cancellationToken);
         return new StorageStatusSnapshot(active, trash, physical.BlobBytes, physical.DerivativeBytes,
             physical.TemporaryBytes, reserved, physical.TotalBytes, physical.AvailableBytes);

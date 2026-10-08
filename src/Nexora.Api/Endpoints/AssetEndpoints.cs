@@ -1,5 +1,6 @@
 using Microsoft.Net.Http.Headers;
 using Nexora.Application.Content;
+using Nexora.Application.Images;
 using Nexora.Application.Storage;
 
 namespace Nexora.Api.Endpoints;
@@ -20,6 +21,18 @@ internal static class AssetEndpoints
             .Produces(StatusCodes.Status206PartialContent, contentType: "application/octet-stream")
             .Produces(StatusCodes.Status304NotModified).Produces(StatusCodes.Status416RangeNotSatisfiable)
             .ProducesProblem(401).ProducesProblem(404).ProducesProblem(503);
+        foreach (var kind in Enum.GetValues<DerivativeKind>())
+        {
+            var derivativeKind = kind;
+            var route = kind == DerivativeKind.Thumbnail ? "thumbnail" : "preview";
+            group.MapMethods($"/{{id:guid}}/{route}", [HttpMethods.Get, HttpMethods.Head],
+                (Guid id, HttpContext context, IAssetDerivatives images, CancellationToken cancellationToken) =>
+                    DerivativeAsync(id, derivativeKind, context, images, cancellationToken))
+                .Produces(StatusCodes.Status200OK, contentType: "image/png")
+                .Produces(StatusCodes.Status206PartialContent, contentType: "image/png")
+                .Produces(StatusCodes.Status304NotModified).Produces(StatusCodes.Status416RangeNotSatisfiable)
+                .ProducesProblem(401).ProducesProblem(404).ProducesProblem(503);
+        }
         endpoints.MapGet("/api/storage", async (HttpContext context, IStorageStatusService storage,
             CancellationToken cancellationToken) => Results.Ok(await storage.GetAsync(
                 AuthenticationEndpoints.UserId(context.User), cancellationToken)))
@@ -54,4 +67,15 @@ internal static class AssetEndpoints
 
     private static IResult NotFound() => ApiProblems.Result(StatusCodes.Status404NotFound,
         "resource_not_found", "Recurso não encontrado.");
+
+    private static async Task<IResult> DerivativeAsync(Guid id, DerivativeKind kind, HttpContext context,
+        IAssetDerivatives images, CancellationToken cancellationToken)
+    {
+        var result = await images.OpenAsync(AuthenticationEndpoints.UserId(context.User), id, kind, cancellationToken);
+        if (result is null) return NotFound();
+        context.Response.Headers.ContentDisposition = "inline";
+        context.Response.Headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+        return Results.Stream(result.Content, contentType: "image/png", lastModified: result.ProcessedAt,
+            entityTag: new EntityTagHeaderValue($"\"{result.GenerationId:N}-{kind}\""), enableRangeProcessing: true);
+    }
 }

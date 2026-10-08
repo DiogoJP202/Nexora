@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Nexora.Application.Content;
 using Nexora.Application.Storage;
 using Nexora.Domain.Content;
+using Nexora.Domain.Images;
 using Nexora.Infrastructure.Persistence;
 
 namespace Nexora.Infrastructure.Content;
@@ -11,7 +12,11 @@ public sealed class PostgresAssetLibrary(NexoraDbContext db, IBlobStorage storag
 {
     private static readonly Expression<Func<Asset, AssetSnapshot>> Snapshot = asset => new AssetSnapshot(
         asset.Id, asset.OriginalName, asset.Blob.Size, asset.Blob.DetectedMimeType,
-        asset.UploadedAt, asset.IsFavorite, asset.DeletedAt);
+        asset.UploadedAt, asset.IsFavorite, asset.DeletedAt,
+        asset.Blob.Image == null ? null : new ImageSnapshot(asset.Blob.Image.State, asset.Blob.Image.Width, asset.Blob.Image.Height,
+            asset.Blob.Image.CapturedAtLocal, asset.Blob.Image.CapturedAtUtc, asset.Blob.Image.ProcessedAt,
+            asset.Blob.Image.State == ImageProcessingState.Ready, asset.Blob.Image.State == ImageProcessingState.Ready,
+            asset.Blob.Image.FailureCode));
 
     public async Task<AssetPage> ListAsync(Guid ownerId, int limit, string? cursor, CancellationToken cancellationToken)
     {
@@ -38,7 +43,7 @@ public sealed class PostgresAssetLibrary(NexoraDbContext db, IBlobStorage storag
     public async Task<AssetContentStream?> OpenContentAsync(Guid ownerId, Guid assetId, CancellationToken cancellationToken)
     {
         var asset = await AccessibleAssets(ownerId).Where(asset => asset.Id == assetId)
-            .Include(item => item.Blob).SingleOrDefaultAsync(cancellationToken);
+            .Include(item => item.Blob).ThenInclude(blob => blob.Image).SingleOrDefaultAsync(cancellationToken);
         if (asset is null) return null;
 
         Stream? content = null;
@@ -48,7 +53,10 @@ public sealed class PostgresAssetLibrary(NexoraDbContext db, IBlobStorage storag
             if (info is null || info.Length != asset.Blob.Size) throw new AssetContentUnavailableException();
             content = await storage.OpenReadAsync(asset.Blob.StorageKey, cancellationToken);
             var snapshot = new AssetSnapshot(asset.Id, asset.OriginalName, asset.Blob.Size,
-                asset.Blob.DetectedMimeType, asset.UploadedAt, asset.IsFavorite, asset.DeletedAt);
+                asset.Blob.DetectedMimeType, asset.UploadedAt, asset.IsFavorite, asset.DeletedAt,
+                asset.Blob.Image is { } image ? new ImageSnapshot(image.State, image.Width, image.Height, image.CapturedAtLocal,
+                    image.CapturedAtUtc, image.ProcessedAt, image.State == ImageProcessingState.Ready,
+                    image.State == ImageProcessingState.Ready, image.FailureCode) : null);
             return new AssetContentStream(snapshot, content, asset.BlobId);
         }
         catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)

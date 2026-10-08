@@ -2,18 +2,23 @@ using System.Buffers.Binary;
 using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Nexora.Application.Content;
 using Nexora.Application.Jobs;
 using Nexora.Application.Storage;
 using Nexora.Application.Uploads;
 using Nexora.Domain.Content;
 using Nexora.Domain.Uploads;
+using Nexora.Domain.Images;
+using Nexora.Domain.Jobs;
+using Nexora.Infrastructure.Configuration;
 using Nexora.Infrastructure.Persistence;
 using Nexora.Infrastructure.Uploads;
 
 namespace Nexora.Infrastructure.Content;
 
-public sealed class PostgresContentCatalog(NexoraDbContext db, ILogger<PostgresContentCatalog> logger, TimeProvider clock)
+public sealed class PostgresContentCatalog(NexoraDbContext db, ILogger<PostgresContentCatalog> logger, TimeProvider clock,
+    IOptions<ImageOptions> imageOptions)
     : IContentCatalog, IUploadContentCatalog
 {
     private static readonly EventId BlobStaged = new(3001, "BlobStaged");
@@ -83,6 +88,7 @@ public sealed class PostgresContentCatalog(NexoraDbContext db, ILogger<PostgresC
         var existing = await db.Assets.FromSqlInterpolated($"SELECT * FROM \"Assets\" WHERE \"OwnerId\" = {ownerId} AND \"BlobId\" = {blobId} FOR UPDATE")
             .SingleOrDefaultAsync(cancellationToken);
         blob.MarkReady();
+        await EnsureImageQueuedAsync(blob, cancellationToken);
         if (existing is not null)
         {
             await db.SaveChangesAsync(cancellationToken);
@@ -138,6 +144,7 @@ public sealed class PostgresContentCatalog(NexoraDbContext db, ILogger<PostgresC
         var expiration = job.LeaseExpiresAt!.Value;
         var now = clock.GetUtcNow();
         blob.MarkReady();
+        await EnsureImageQueuedAsync(blob, cancellationToken);
         AssetImportStatus status;
         if (asset?.DeletedAt is not null)
         {
@@ -177,7 +184,20 @@ public sealed class PostgresContentCatalog(NexoraDbContext db, ILogger<PostgresC
         => new(blob.Id, blob.Sha256, blob.Size, blob.DetectedMimeType, blob.StorageKey, blob.State);
 
     private static AssetSnapshot Snapshot(Asset asset, Blob blob)
-        => new(asset.Id, asset.OriginalName, blob.Size, blob.DetectedMimeType, asset.UploadedAt, asset.IsFavorite, asset.DeletedAt);
+        => new(asset.Id, asset.OriginalName, blob.Size, blob.DetectedMimeType, asset.UploadedAt, asset.IsFavorite, asset.DeletedAt,
+            blob.Image is { } image ? new ImageSnapshot(image.State, image.Width, image.Height, image.CapturedAtLocal,
+                image.CapturedAtUtc, image.ProcessedAt, image.State == ImageProcessingState.Ready,
+                image.State == ImageProcessingState.Ready, image.FailureCode) : null);
+
+    private async Task EnsureImageQueuedAsync(Blob blob, CancellationToken cancellationToken)
+    {
+        if (!BlobImage.Supports(blob.DetectedMimeType)) return;
+        var existing = await db.BlobImages.SingleOrDefaultAsync(image => image.BlobId == blob.Id, cancellationToken);
+        if (existing is not null) return;
+        var now = clock.GetUtcNow();
+        db.BlobImages.Add(new BlobImage(blob.Id, now));
+        db.BackgroundJobs.Add(BackgroundJob.ForImage(Guid.CreateVersion7(now), blob.Id, now, imageOptions.Value.MaximumJobAttempts));
+    }
 
     private static AssetImportResult Unavailable() => new(AssetImportStatus.BlobUnavailable, null);
 }

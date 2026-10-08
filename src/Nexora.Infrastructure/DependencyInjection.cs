@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using Nexora.Application.Authentication;
 using Nexora.Application.Content;
 using Nexora.Application.Jobs;
+using Nexora.Application.Images;
 using Nexora.Application.Storage;
 using Nexora.Application.Uploads;
 using Nexora.Infrastructure.Authentication;
@@ -16,6 +17,7 @@ using Nexora.Infrastructure.Configuration;
 using Nexora.Infrastructure.Content;
 using Nexora.Infrastructure.HealthChecks;
 using Nexora.Infrastructure.Identity;
+using Nexora.Infrastructure.Images;
 using Nexora.Infrastructure.Persistence;
 using Nexora.Infrastructure.Storage;
 using Nexora.Infrastructure.Uploads;
@@ -33,6 +35,9 @@ public static class DependencyInjection
 
         services.AddSingleton<IValidateOptions<UploadOptions>, UploadOptionsValidator>();
         services.AddOptions<UploadOptions>().Bind(configuration.GetSection(UploadOptions.SectionName)).ValidateOnStart();
+
+        services.AddSingleton<IValidateOptions<ImageOptions>, ImageOptionsValidator>();
+        services.AddOptions<ImageOptions>().Bind(configuration.GetSection(ImageOptions.SectionName)).ValidateOnStart();
 
         services.AddSingleton<IValidateOptions<DatabaseOptions>, DatabaseOptionsValidator>();
         services.AddOptions<DatabaseOptions>()
@@ -95,6 +100,11 @@ public static class DependencyInjection
         services.AddScoped<IUploadService, PostgresUploadService>();
         services.AddScoped<IUploadWorkStore, PostgresUploadWorkStore>();
         services.AddScoped<IUploadJobProcessor, UploadJobProcessor>();
+        services.AddSingleton<IDerivativeStorage, LocalDerivativeStorage>();
+        services.AddSingleton<IImageRenderer, ProcessImageRenderer>();
+        services.AddScoped<IImageWorkStore, PostgresImageWorkStore>();
+        services.AddScoped<IImageJobProcessor, ImageJobProcessor>();
+        services.AddScoped<IAssetDerivatives, PostgresAssetDerivatives>();
         services.AddScoped<IAssetLibrary, PostgresAssetLibrary>();
         services.AddScoped<IStorageStatusService, PostgresStorageStatusService>();
         services.AddSingleton<IStorageUsageReader, LocalStorageUsageReader>();

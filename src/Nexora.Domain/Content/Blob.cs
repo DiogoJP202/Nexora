@@ -1,3 +1,5 @@
+using Nexora.Domain.Images;
+
 namespace Nexora.Domain.Content;
 
 public sealed class Blob
@@ -38,6 +40,7 @@ public sealed class Blob
     public BlobState State { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public ICollection<Asset> Assets { get; private set; } = [];
+    public BlobImage? Image { get; private set; }
 
     public void MarkReady()
     {
