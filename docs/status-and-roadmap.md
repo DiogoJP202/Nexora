@@ -2,7 +2,7 @@
 
 Atualizado em **8 de outubro de 2026**. Código de referência da Fase 6: `e27ca91`. As fases 1 a 6 foram verificadas localmente no Windows com PostgreSQL nativo; a operação no Arch continua pendente.
 
-O Nexora já tem fundação, autenticação, armazenamento com deduplicação, arquivos/imagens por API e biblioteca com timeline, favoritos, renomeação, lixeira, restauração e coleta segura. A próxima entrega é a Fase 7, com operação no Arch e restauração de backup. Clientes dependem das fases seguintes.
+O Nexora já tem fundação, autenticação, armazenamento com deduplicação, arquivos/imagens por API e biblioteca com timeline, favoritos, renomeação, lixeira, restauração e coleta segura. A Fase 7 está em preparação: ferramentas Linux e procedimentos de operação disponíveis, com execução no Arch e restauração real pendentes. Clientes dependem das fases seguintes.
 
 ## 1. O que o projeto pretende ser
 
@@ -36,7 +36,7 @@ Os detalhes técnicos e as razões dessas decisões estão em [architecture.md](
 | 4 — Arquivos utilizáveis | Concluída | Upload retomável, Worker durável, biblioteca básica, download e capacidade. |
 | 5 — Imagens | Concluída localmente | Metadados, orientação, thumbnails/previews PNG e processamento com limites. |
 | 6 — Biblioteca | Concluída localmente | Timeline, favoritos, renomeação, lixeira, restauração e limpeza definitiva segura. |
-| 7 — Operação | Pendente | Arch/systemd, Tailscale/HTTPS, revisão de segurança e restauração de backup. |
+| 7 — Operação | Em preparação | Publicação Linux, scripts e guias disponíveis; instalação, HTTPS e restauração real no Arch pendentes. |
 | 8 — Mobile futuro | Pendente | Contrato de sincronização e cliente MAUI Android; iOS depois. |
 
 Não há estimativas de datas ou percentual de conclusão. As fases têm tamanhos diferentes; o avanço será registrado pelas entregas verificadas.
@@ -72,7 +72,7 @@ Não há estimativas de datas ou percentual de conclusão. As fases têm tamanho
 - [x] Confiança em Forwarded Headers limitada a proxies loopback.
 - [x] Testes de expiração, rotação/replay concorrente, revogação, isolamento entre proprietários, lockout/reset e persistência de chaves.
 
-O suporte a configurações de produção está no código. O deploy Arch, os serviços systemd, as grants Tailscale e os procedimentos de backup/restauração ainda serão preparados e verificados na Fase 7.
+O suporte a configurações de produção está no código. A Fase 7 disponibiliza unidades systemd, configuração Tailscale e procedimentos de backup/restauração; sua execução e validação no servidor permanecem pendentes.
 
 ### Fase 3 — Armazenamento e identidade dos arquivos
 
@@ -189,18 +189,24 @@ As listas abaixo são trabalho planejado. Cada fase só será concluída após i
 
 ### Fase 7 — Operação no servidor pessoal
 
-Depende dos fluxos de arquivos e biblioteca verificados.
+Os fluxos de arquivos e biblioteca foram verificados localmente. A preparação abaixo pode ser feita no Windows; o aceite exige execução no servidor Arch.
 
-- [ ] Preparar instalação e atualização no Arch Linux, usuário dedicado e unidades systemd para API e Worker.
-- [ ] Restringir diretórios, chaves, credenciais e PostgreSQL; manter Kestrel em loopback.
+- [x] Preparar publicação Linux x64 com runtime 10.0.12 incluído, versões travadas, migration bundle, SQL para revisão e manifesto SHA-256.
+- [x] Preparar instalador sem sobrescrita, usuário dedicado, diretórios privados, unidades systemd e ativação explícita com parada dos processos.
+- [x] Documentar PostgreSQL 18 com credenciais externas e roles separadas para migrations e aplicação, certificados, chaves e Kestrel em loopback.
+- [x] Revisar configuração de proxy/Host, limites dos serviços e regras privadas Tailscale; disponibilizar exemplos sem segredos.
+- [ ] Executar instalação e verificar permissões, isolamento e configuração recusada quando inválida no Arch real.
 - [ ] Configurar Tailscale Serve com HTTPS, grants restritas e Funnel desativado; verificar o acesso no ambiente real.
 - [ ] Verificar Data Protection com certificado no Linux e recuperação de chaves fora da instalação.
 - [ ] Revisar autorização, limites, dependências nativas e comportamento após reinício de serviços/servidor.
 - [ ] Verificar carga e processamento Skia no Arch, limites de memória de serviço e recuperação do processo filho após timeout/reinício.
-- [ ] Documentar e observar espaço livre, reservas, temporários, processamento e tarefas esgotadas.
-- [ ] Documentar backup manual consistente de PostgreSQL, storage, configuração e chaves, com cópia independente do servidor.
+- [x] Documentar diagnóstico de serviços, espaço, reservas, temporários, processamento e tarefas esgotadas.
+- [x] Preparar scripts e documentar backup manual consistente de PostgreSQL, storage, configuração e chaves, com cópia independente do servidor.
+- [ ] Executar backup no Arch e conferir a cópia independente e seus hashes.
 - [ ] Executar restauração em ambiente isolado e verificar banco, login, originais e derivados recuperados.
-- [ ] Documentar migrations explícitas e recuperação de uma atualização interrompida.
+- [x] Documentar migrations explícitas e recuperação de uma atualização interrompida, sem rollback automático de schema.
+
+O [registro de validação](arch-validation.md) separa publicação/testes no Windows de verificações reais pendentes. A presença dos scripts não comprova funcionamento de systemd, Skia Linux, Tailscale ou recuperação de dados.
 
 **Aceite:** serviços iniciam corretamente após reinício; acesso funciona somente pelo desenho privado aprovado; backup é restaurado e seu conteúdo é conferido; procedimentos de atualização e recuperação são reproduzíveis. Esse é o marco para considerar o backend do MVP pronto para uso com dados pessoais em produção.
 
@@ -267,3 +273,6 @@ Ao concluir um incremento:
 | [Uploads e Worker](uploads.md) | Integrar chunks, retomada, finalização, biblioteca/download e capacidade. |
 | [Imagens e derivados](images.md) | Integrar metadados, estados e PNGs autorizados; consultar limites, processamento e recuperação. |
 | [Biblioteca e lixeira](library.md) | Integrar filtros, timeline, edição, restauração e conhecer retenção/coleta. |
+| [Instalação no Arch](arch-deployment.md) | Publicar, configurar, instalar, atualizar e diagnosticar os serviços privados. |
+| [Backup e restauração](backup-and-restore.md) | Criar snapshot manual e exercitar recuperação isolada. |
+| [Validação no Arch](arch-validation.md) | Registrar evidências e acompanhar o aceite operacional pendente. |

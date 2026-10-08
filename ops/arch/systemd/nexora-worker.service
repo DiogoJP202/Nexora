@@ -1,0 +1,54 @@
+[Unit]
+Description=Nexora upload, image and retention worker
+After=network.target postgresql.service
+Wants=postgresql.service
+RequiresMountsFor=/srv/nexora /opt/nexora/current/worker
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=nexora
+Group=nexora
+WorkingDirectory=/opt/nexora/current/worker
+ExecStart=/opt/nexora/current/worker/Nexora.Worker
+EnvironmentFile=/etc/nexora/common.env
+EnvironmentFile=/etc/nexora/worker.env
+Environment=DOTNET_ENVIRONMENT=Production ASPNETCORE_ENVIRONMENT=Production
+Environment=DOTNET_EnableDiagnostics=0 TZ=UTC
+Environment=DOTNET_GCHeapHardLimit=10000000
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=90
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nexora-worker
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+ReadWritePaths=/srv/nexora
+MemoryAccounting=yes
+# This cgroup budget includes the parent and its image-rendering children. The
+# application's per-child watchdog default is 512 MiB, not a separate cgroup.
+MemoryHigh=1024M
+MemoryMax=1536M
+MemorySwapMax=0
+TasksMax=256
+LimitCORE=0
+# Leave .NET JIT/native codec syscalls available until tested on the Arch host.
+
+[Install]
+WantedBy=multi-user.target

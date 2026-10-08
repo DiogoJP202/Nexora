@@ -7,5 +7,6 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../Nexora.Infrastructure/Nexora.Infrastructure.csproj" />
     <None Update="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="appsettings.*.json;**/secrets.json;**/.env;**/.env.*;**/*.pfx;**/*.p12;**/*.key" CopyToPublishDirectory="Never" />
   </ItemGroup>
 </Project>

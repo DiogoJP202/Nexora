@@ -1,0 +1,53 @@
+[Unit]
+Description=Nexora private API
+After=network.target postgresql.service
+Wants=postgresql.service
+RequiresMountsFor=/srv/nexora /var/lib/nexora/keys /opt/nexora/current/api
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=nexora
+Group=nexora
+WorkingDirectory=/opt/nexora/current/api
+ExecStart=/opt/nexora/current/api/Nexora.Api
+EnvironmentFile=/etc/nexora/common.env
+EnvironmentFile=/etc/nexora/api.env
+Environment=ASPNETCORE_ENVIRONMENT=Production DOTNET_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5100 DOTNET_EnableDiagnostics=0 TZ=UTC
+Environment=DOTNET_GCHeapHardLimit=10000000
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=90
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nexora-api
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+ReadWritePaths=/srv/nexora /var/lib/nexora/keys
+MemoryAccounting=yes
+MemoryHigh=384M
+MemoryMax=512M
+MemorySwapMax=0
+TasksMax=256
+LimitCORE=0
+# .NET JIT and Skia native code require executable memory; restrictive syscall
+# filters and MemoryDenyWriteExecute need real-host compatibility validation.
+
+[Install]
+WantedBy=multi-user.target

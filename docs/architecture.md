@@ -2,7 +2,7 @@
 
 Nexora é uma nuvem privada para fotos, vídeos e arquivos pessoais, executada em um único servidor Arch Linux com aproximadamente 500 GB disponíveis. O MVP terá uma conta administrativa, acesso privado por Tailscale e uma API ASP.NET Core. O cliente mobile será uma etapa posterior.
 
-Este documento registra o desenho aprovado e sua implementação incremental. As fases 1 a 6 entregam fundação, autenticação, conteúdo imutável, uploads retomáveis, downloads, imagens e biblioteca com timeline, favoritos e lixeira. A base foi validada localmente no Windows; a operação em produção será preparada e verificada na Fase 7.
+Este documento registra o desenho aprovado e sua implementação incremental. As fases 1 a 6 entregam fundação, autenticação, conteúdo imutável, uploads retomáveis, downloads, imagens e biblioteca com timeline, favoritos e lixeira. A base foi validada localmente no Windows. A Fase 7 já prepara publicação Linux, systemd e procedimentos operacionais; o aceite de produção depende da execução e da restauração real no Arch.
 
 Consulte [estado e próximas etapas](status-and-roadmap.md) para o inventário das entregas atuais, as pendências de cada fase e seus critérios de aceite.
 
@@ -172,7 +172,7 @@ Após a retenção configurada, o Worker remove o Asset e destaca resultados de 
 - Logs estruturados com IDs técnicos e resultado, sem tokens, connection strings, conteúdo de arquivos, nomes pessoais ou coordenadas.
 - Observabilidade de espaço, reservas, jobs e uploads falhos; diferenciar tamanho lógico de Assets de bytes físicos de Blobs, derivados, lixeira e temporários.
 
-Nexora oferece armazenamento; uma única cópia no servidor não é backup. Documentar backup conjunto de PostgreSQL, storage, configuração e chaves, preferencialmente pausando gravações/workers ou usando uma estratégia de snapshot consistente. Testar restauração em ambiente isolado. A integração com restic/borg fica fora do escopo atual; a Fase 7 prevê procedimentos manuais documentados.
+Nexora oferece armazenamento; uma única cópia no servidor não é backup. Os scripts de operação pausam API e Worker, conferem a parada dos processos filhos e registram PostgreSQL, storage, configuração e chaves em um snapshot manual. A restauração exige banco novo e destino isolado, sem reaplicar automaticamente configurações de produção. Preserve uma cópia independente do servidor e o código correspondente às migrations. O [procedimento de recuperação](backup-and-restore.md) precisa ser exercitado no Arch; integração com restic/borg permanece futura.
 
 ## Testes implementados e prioridades seguintes
 
@@ -200,7 +200,7 @@ Na Fase 1, verificar configuração, health checks, acesso PostgreSQL e migratio
 | 7 — Operação | Deploy systemd/Arch, HTTPS/Tailscale, revisão de segurança, observabilidade e procedimentos de backup/restauração. |
 | 8 — Mobile | Contrato de sincronização, registro de mudanças e cliente MAUI Android; iOS posteriormente, respeitando as restrições de background de cada plataforma. |
 
-Segurança acompanha cada funcionalidade desde sua criação. A etapa atual termina na Fase 6, com aceite local verificado. O próximo incremento é a Fase 7: instalação Arch/systemd, acesso privado HTTPS/Tailscale, revisão operacional e exercício de backup/restauração.
+Segurança acompanha cada funcionalidade desde sua criação. O aceite local das fases 1 a 6 está verificado. A Fase 7 tem ferramentas de preparação e procedimentos documentados em [arch-deployment.md](arch-deployment.md); seu aceite exige as evidências de execução real descritas em [arch-validation.md](arch-validation.md).
 
 ## Referências técnicas
 

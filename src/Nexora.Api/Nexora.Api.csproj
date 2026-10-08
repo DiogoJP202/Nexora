@@ -3,6 +3,8 @@
     <UserSecretsId>Nexora.Api.Development</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
+    <Content Update="appsettings.*.json;**/secrets.json;**/.env;**/.env.*;**/*.pfx;**/*.p12;**/*.key" CopyToPublishDirectory="Never" />
+    <Content Update="appsettings.Production.json" CopyToPublishDirectory="PreserveNewest" />
     <ProjectReference Include="../Nexora.Application/Nexora.Application.csproj" />
     <ProjectReference Include="../Nexora.Infrastructure/Nexora.Infrastructure.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />

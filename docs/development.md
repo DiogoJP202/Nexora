@@ -204,3 +204,23 @@ Testes de conteúdo, uploads e imagens usam diretórios próprios sob a pasta te
 O [guia de armazenamento](storage.md) descreve os contratos internos; [uploads.md](uploads.md) e [images.md](images.md) descrevem admissão, reservas e recuperação durável. Não há quota fixa de 500 GB: capacidade e espaço livre vêm do volume. Os caminhos nativos de publicação, sincronização, locks Linux e Skia precisam de validação no Arch; os resultados locais são de Windows. Testes de falha injetada e recuperação de lease não comprovam persistência após queda de energia.
 
 Esses comandos descrevem a validação disponível; a documentação não representa um relatório de testes de uma execução específica.
+
+## Preparação da release Arch no Windows
+
+`scripts/Publish-ArchRelease.ps1` usa PowerShell 7 e o SDK escolhido por `global.json`. A solution inclui o RID `linux-x64` nos arquivos de lock; publicação self-contained fixa runtime 10.0.12. O desenvolvimento normal continua usando o runtime disponível com o SDK local.
+
+```powershell
+pwsh -File scripts/Publish-ArchRelease.ps1 -ReleaseId <id>
+```
+
+Execute a partir de um commit limpo, sem editar código durante a publicação. A saída `artifacts/arch/<id>` inclui API, Worker, migration bundle e os scripts operacionais, com manifesto SHA-256 completo. O script recusa destino existente e preserva artefatos parciais se falhar; eles não devem ser instalados. Guarde o hash mostrado do manifesto fora do pacote. `-AllowDirty` permite uma verificação local, identificada no metadata e recusada pelo instalador de produção.
+
+Publicações excluem configurações Development/Local, `.env`, certificados e arquivos de segredos; configuração Production pública permanece na API. Não coloque credenciais em arquivos versionados, nem conteúdo pessoal nos projetos. Ambiente e User Secrets não são transportados. No servidor, a configuração será criada em `/etc/nexora`, fora da release.
+
+Para conferir as guardas sem tocar serviços ou PostgreSQL, use Bash, inclusive Git Bash no Windows:
+
+```bash
+bash tests/operations/Validate-Guards.sh
+```
+
+O resultado diferencia verificações aprovadas e indisponíveis, incluindo links que Git Bash pode emular como cópias. Instalação, migrations e recuperação completas seguem [arch-deployment.md](arch-deployment.md) e [backup-and-restore.md](backup-and-restore.md); a execução real é registrada em [arch-validation.md](arch-validation.md).

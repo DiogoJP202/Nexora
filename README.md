@@ -2,9 +2,11 @@
 
 Nuvem privada para fotos, vídeos e arquivos pessoais, construída com .NET 10, ASP.NET Core, EF Core e PostgreSQL 18. O destino de produção é um servidor Arch Linux, com systemd e acesso privado por Tailscale.
 
-## Estado atual: Fase 6
+## Estado atual: Fase 7 em preparação
 
-A API inclui autenticação com Identity, tokens opacos, sessões e revogação de dispositivos, além de configuração validada, PostgreSQL, migrations e health checks. Arquivos podem ser enviados em chunks retomáveis, finalizados pelo Worker, listados e baixados com HTTP Range. JPEG, PNG e WebP estáticos recebem metadados, orientação corrigida, thumbnail e preview autenticados. A biblioteca oferece timeline, filtros, favoritos, renomeação, lixeira e restauração. O Worker remove itens após a retenção e coleta somente Blobs sem referências. Blob/Asset mantêm armazenamento imutável, SHA-256 e deduplicação; falha de imagem preserva o original. A conta administrativa é criada somente por comando local. A próxima fase prepara operação no Arch, backup e restauração.
+A API inclui autenticação com Identity, tokens opacos, sessões e revogação de dispositivos, além de configuração validada, PostgreSQL, migrations e health checks. Arquivos podem ser enviados em chunks retomáveis, finalizados pelo Worker, listados e baixados com HTTP Range. JPEG, PNG e WebP estáticos recebem metadados, orientação corrigida, thumbnail e preview autenticados. A biblioteca oferece timeline, filtros, favoritos, renomeação, lixeira e restauração. O Worker remove itens após a retenção e coleta somente Blobs sem referências. Blob/Asset mantêm armazenamento imutável, SHA-256 e deduplicação; falha de imagem preserva o original. A conta administrativa é criada somente por comando local.
+
+As fases 1 a 6 foram verificadas no Windows. A Fase 7 acrescenta publicação para Linux x64, unidades systemd, instalação e ativação explícitas, configuração privada e procedimentos de backup/restauração. A execução real no Arch, o HTTPS privado e o exercício de recuperação permanecem pendentes. Consulte [instalação no Arch](docs/arch-deployment.md), [backup e restauração](docs/backup-and-restore.md) e o [registro de validação](docs/arch-validation.md).
 
 Os projetos atuais são `Nexora.Api`, `Nexora.Application`, `Nexora.Domain`, `Nexora.Infrastructure`, `Nexora.Worker`, `Nexora.UnitTests` e `Nexora.IntegrationTests`. O cliente MAUI entra na Fase 8.
 
@@ -78,5 +80,8 @@ Testes unitários, HTTP/configuração e filesystem executam sem PostgreSQL. Tes
 - [Uploads e Worker](docs/uploads.md): contratos HTTP, retomada, finalização durável, download e capacidade.
 - [Imagens e derivados](docs/images.md): metadados, estados, configuração, processo nativo, publicação e recuperação.
 - [Biblioteca e lixeira](docs/library.md): timeline, filtros, edição, restauração, retenção e coleta segura.
+- [Instalação e operação no Arch](docs/arch-deployment.md): pacote Linux, PostgreSQL, systemd, Tailscale, atualização e diagnóstico.
+- [Backup e restauração](docs/backup-and-restore.md): snapshot consistente e recuperação em destino isolado.
+- [Validação no Arch](docs/arch-validation.md): evidências locais e verificações necessárias para concluir a Fase 7.
 
 Segredos, binários PostgreSQL, dados de banco e arquivos pessoais ficam fora do repositório. Nexora é armazenamento; backups do banco e do conteúdo continuam necessários.
