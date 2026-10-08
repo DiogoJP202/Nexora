@@ -2,7 +2,7 @@
 
 Nexora é uma nuvem privada para fotos, vídeos e arquivos pessoais, executada em um único servidor Arch Linux com aproximadamente 500 GB disponíveis. O MVP terá uma conta administrativa, acesso privado por Tailscale e uma API ASP.NET Core. O cliente mobile será uma etapa posterior.
 
-Este documento registra o desenho aprovado e sua implementação incremental. As fases 1 a 5 entregam fundação, autenticação, conteúdo imutável, uploads retomáveis, downloads e processamento inicial de imagens pelo Worker. Biblioteca completa e operação em produção continuam nas fases seguintes; a Fase 5 foi validada localmente no Windows.
+Este documento registra o desenho aprovado e sua implementação incremental. As fases 1 a 6 entregam fundação, autenticação, conteúdo imutável, uploads retomáveis, downloads, imagens e biblioteca com timeline, favoritos e lixeira. A base foi validada localmente no Windows; a operação em produção será preparada e verificada na Fase 7.
 
 Consulte [estado e próximas etapas](status-and-roadmap.md) para o inventário das entregas atuais, as pendências de cada fase e seus critérios de aceite.
 
@@ -62,7 +62,7 @@ Blob e Asset separados permitem deduplicar bytes sem acoplar nome, favorito ou e
 
 A importação de conteúdo idêntico retorna o Asset ativo existente, sem alterar seus metadados. Se estiver na lixeira, retorna `AssetInTrash`, exigindo restauração explícita; uploads HTTP registram essa decisão como falha terminal `asset_in_trash`. Concluir novamente a mesma UploadSession retorna a mesma operação ou seu resultado anterior.
 
-Não manter `ReferenceCount` persistido inicialmente: consultar referências incluindo a lixeira evita divergência de contadores. BlobImage mantém dimensões após orientação e captura extraída do EXIF. Câmera e geolocalização ficam para um incremento posterior. Datas EXIF sem offset válido ficam como horário local de origem, sem conversão UTC inventada; timestamps operacionais são UTC. Timeline e fallback para upload entram na Fase 6.
+Não manter `ReferenceCount` persistido inicialmente: consultar referências incluindo a lixeira evita divergência de contadores. BlobImage mantém dimensões após orientação e captura extraída do EXIF. Câmera e geolocalização ficam para um incremento posterior. Datas EXIF sem offset válido ficam como horário local de origem, sem conversão UTC inventada; timestamps operacionais são UTC. A timeline usa captura UTC confiável ou upload e mantém uma fronteira de processamento entre páginas, conforme [library.md](library.md).
 
 ## Autenticação e acesso
 
@@ -76,13 +76,13 @@ As chaves de ASP.NET Core Data Protection persistem fora da instalação e do st
 
 Passphrases têm de 14 a 256 caracteres, sem regras artificiais de composição; email também é username. Identity bloqueia a conta por 15 minutos após cinco falhas. Login tem limite de cinco chamadas por IP/minuto e refresh de 30 por IP/minuto. Os [contratos e fluxos implementados](authentication.md) detalham login, refresh e revogação.
 
-Os endpoints de Assets, uploads e conteúdo verificam o proprietário; lixeira seguirá a mesma regra na Fase 6. UUID, StorageKey ou SHA-256 não concedem acesso. Consultas internas por hash resolvem deduplicação sem expor conteúdo de outra conta.
+Os endpoints de Assets, uploads, conteúdo e lixeira verificam o proprietário. UUID, StorageKey ou SHA-256 não concedem acesso. Consultas internas por hash resolvem deduplicação sem expor conteúdo de outra conta.
 
 Originais autenticados usam streaming, nomes de resposta tratados pelo framework, `application/octet-stream`, attachment e `nosniff`. Derivados confirmados e verificados são PNG reencodificados, servidos inline com CSP restrita e sem cache. MIME e extensão informados pelo cliente não são prova de conteúdo; arquivos arbitrários não devem ser executados nem renderizados como HTML no domínio da API.
 
 ## Contratos HTTP atuais e previstos
 
-Os endpoints das fases 2, 4 e 5 estão implementados; os da Fase 6 continuam previstos. Recursos de usuário sempre exigem autenticação e autorização; login/refresh têm validação e limitação próprias.
+Os endpoints das fases 2, 4, 5 e 6 estão implementados. Recursos de usuário sempre exigem autenticação e autorização; login/refresh têm validação e limitação próprias.
 
 | Fase | Contrato | Responsabilidade |
 | --- | --- | --- |
@@ -93,7 +93,7 @@ Os endpoints das fases 2, 4 e 5 estão implementados; os da Fase 6 continuam pre
 | 4 | `GET /api/assets`, `GET /api/assets/{id}`, `GET`/`HEAD /api/assets/{id}/content` | Listagem básica, metadados e download com HTTP Range/ETag. |
 | 4 | `GET /api/storage` | Espaço físico, tamanho lógico e reservas. |
 | 5 | `GET`/`HEAD /api/assets/{id}/thumbnail`, `/api/assets/{id}/preview` | Servir PNGs autorizados, verificados por hash/tamanho, com Range/ETag. |
-| 6 | `PATCH /api/assets/{id}` | Alterar favoritos e os metadados editáveis previstos. |
+| 6 | `PATCH /api/assets/{id}` | Renomear e/ou alterar favorito, preservando identidade e upload. |
 | 6 | `DELETE /api/assets/{id}`, `GET /api/trash`, `POST /api/trash/{id}/restore` | Soft delete, listagem da lixeira e restauração explícita. |
 
 Usar Problem Details para erros e DTOs sem caminhos físicos ou entidades EF expostas. A conclusão do upload retorna `202` durante processamento e `200` ao repetir uma conclusão terminal; consultar a sessão informa o resultado ou a falha. Downloads completos/parciais trabalham com Streams e respeitam Range válido, inclusive `206` e `416` quando aplicável. Os [contratos da Fase 4](uploads.md) descrevem índices, estados, erros, paginação e capacidade.
@@ -124,7 +124,7 @@ Defaults atuais de upload e parâmetros das fases seguintes:
 | Margem mínima de espaço livre | 50 GiB. |
 | Sessões simultâneas por usuário | 2, condicionadas à capacidade global. |
 | Expiração de upload inativo | 7 dias sem atividade. |
-| Retenção na lixeira | 30 dias, prevista para a Fase 6. |
+| Retenção na lixeira | 30 dias, configurável em Library. |
 | Concorrência de processamento | Uma montagem e uma imagem por Worker, em rotinas separadas. |
 
 Reservar `2 × tamanho declarado` na criação da sessão, serializando a admissão no banco e conferindo espaço real. A contagem conservadora exige reservas + temporários físicos + nova reserva dentro do orçamento, além de espaço livre para margem + todas as reservas. O orçamento de 50 GiB admite somente um upload de 20 GiB, mesmo que o teto de sessões seja dois. O corpo não pode exceder o tamanho esperado; outros usos do volume afetam o espaço livre. A referência de 500 GB não constitui quota fixa.
@@ -141,7 +141,7 @@ PostgreSQL e filesystem não compartilham uma transação. A Fase 3 persiste a i
 
 Os adaptadores locais mantêm `temp` e `blobs` no mesmo filesystem, fazem flush do arquivo e publicam sem sobrescrita. No Linux, usam `renameat2(RENAME_NOREPLACE)` e sincronizam diretórios com `fsync`, recusando movimento entre mounts. Caminhos não canônicos, symlinks e junctions são rejeitados; diretórios e arquivos recebem permissões restritas. Essa responsabilidade fica no adaptador, sem contaminar a interface de storage.
 
-A Fase 4 recupera jobs com lease expirado, verifica montagens persistidas e retoma publicação da mesma geração, ou registra falha explícita. Manutenção limpa temporários terminais antes de liberar reservas e coleta somente temporários internos antigos, sem referência e sem escritor ativo. Não há coleta de Blobs ou varredura de reparação de todos os originais. Execução nativa Linux e persistência após reinício/queda de energia no Arch continuam pendentes na operação. Os guias de [armazenamento](storage.md) e [uploads](uploads.md) detalham os limites de recuperação.
+A Fase 4 recupera jobs com lease expirado, verifica montagens persistidas e retoma publicação da mesma geração, ou registra falha explícita. Manutenção limpa temporários terminais antes de liberar reservas e coleta temporários internos antigos, sem referência e sem escritor ativo. A Fase 6 acrescenta coleta de Blobs sem Assets por intenção Deleting, incluindo os derivados; não implementa uma varredura de reparação de todos os originais. Execução nativa Linux e persistência após reinício/queda de energia no Arch continuam pendentes na operação. Os guias de [armazenamento](storage.md), [uploads](uploads.md) e [biblioteca](library.md) detalham os limites de recuperação.
 
 Reconciliação recupera operações interrompidas; não recria bytes perdidos por falha física. Backup e teste de restauração continuam necessários para proteger o conteúdo diante de falhas de hardware e perda de dados.
 
@@ -157,9 +157,9 @@ Cada imagem reserva duas vezes o máximo de derivado, inicialmente 16 MiB, sob o
 
 A falha do processamento não remove nem invalida um original publicado. Imagens animadas e acima dos limites ficam disponíveis como originais, com falha consultável. A API informa estado e serve somente PNGs `Ready`, sem carregar o original. Não há retry manual HTTP de imagem nesta entrega. Vídeos e FFmpeg ficam para depois; HTTP Range para originais já está disponível, sem transcodificação.
 
-Na Fase 6, soft delete alterará `Asset.DeletedAt` e manterá o Blob. Lixeira conservará bytes e referências. Restauração e purge disputarão o mesmo lock do Asset; uma exclusão definitiva concluída não poderá ser restaurada pela API.
+Na Fase 6, soft delete altera `Asset.DeletedAt` e mantém o Blob. Lixeira conserva bytes e referências. Restauração e purge disputam locks de Blob/Asset; uma exclusão definitiva concluída não pode ser restaurada pela API.
 
-Após o período configurável de retenção, o worker removerá o Asset. Para remover um Blob sem referências, travará sua linha, verificará ausência de todos os Assets e mudará o estado para `Deleting` em transação. A criação de referências também travará essa linha e aceitará somente `Ready`. Depois do commit, a exclusão física será idempotente e a linha será removida quando a limpeza terminar.
+Após a retenção configurada, o Worker remove o Asset e destaca resultados de uploads concluídos com `ResultPurgedAt`, preservando sucesso/histórico. A coleta adquire o mesmo advisory de hash da criação de referências, protege contra processamento ativo de imagem, trava o Blob, verifica ausência de todos os Assets e confirma `Deleting`. Depois exclui e sincroniza originais, derivados e tentativas; somente então remove a linha/reservas. Erros mantêm a intenção para retry. Referências novas recusam Deleting; reuploads após coleta usam outro UUID físico. Intenções Staging são preservadas. Os contratos estão em [library.md](library.md).
 
 ## Segurança, operação e backup
 
@@ -182,7 +182,7 @@ A Fase 3 verifica regras de Blob/Asset, chaves canônicas, hashing e cancelament
 
 A Fase 4 acrescenta testes de autorização, limites, chunks repetidos/conflitantes/fora de ordem, hash, deduplicação, conclusão repetida, leases, expiração, falhas nas fronteiras filesystem/banco, limpeza/capacidade e HTTP Range. Testes usam bancos e storage isolados. Os resultados da validação estão no [roadmap](status-and-roadmap.md).
 
-A Fase 5 acrescenta verificação de orientação/captura, metadados sem UTC inventado, PNGs autenticados, limites/protocolo e preservação do original em falha. Nas fases seguintes, verificar GC contra upload e purge contra restauração; e reinícios reais, caminhos nativos Linux/Skia e restauração no ambiente de operação.
+A Fase 5 acrescenta verificação de orientação/captura, metadados sem UTC inventado, PNGs autenticados, limites/protocolo e preservação do original em falha. A Fase 6 verifica filtros/paginação, favoritos, lixeira/restauração, GC contra deduplicação, purge contra restauração, histórico purgado, falha de exclusão e conexão do processor perdida. Reinícios reais, caminhos nativos Linux/Skia e restauração permanecem na operação.
 
 Na Fase 1, verificar configuração, health checks, acesso PostgreSQL e migrations em bancos de integração isolados. Não simular funcionalidades que ainda não existem apenas para gerar cobertura.
 
@@ -200,7 +200,7 @@ Na Fase 1, verificar configuração, health checks, acesso PostgreSQL e migratio
 | 7 — Operação | Deploy systemd/Arch, HTTPS/Tailscale, revisão de segurança, observabilidade e procedimentos de backup/restauração. |
 | 8 — Mobile | Contrato de sincronização, registro de mudanças e cliente MAUI Android; iOS posteriormente, respeitando as restrições de background de cada plataforma. |
 
-Segurança acompanha cada funcionalidade desde sua criação; a Fase 7 verifica e fecha a operação de produção. A etapa atual termina na Fase 5, com aceite local verificado. O próximo incremento é a Fase 6: timeline, favoritos, lixeira, restauração e purge seguro.
+Segurança acompanha cada funcionalidade desde sua criação. A etapa atual termina na Fase 6, com aceite local verificado. O próximo incremento é a Fase 7: instalação Arch/systemd, acesso privado HTTPS/Tailscale, revisão operacional e exercício de backup/restauração.
 
 ## Referências técnicas
 

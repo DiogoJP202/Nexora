@@ -8,7 +8,7 @@ A Fase 3 introduziu modelos e casos de uso internos para importar conteúdo. A F
 
 `Asset` representa um item de uma conta: UUID, proprietário, Blob, nome original, upload UTC, favorito e `DeletedAt`. O par `(OwnerId, BlobId)` é único, inclusive quando o item está na lixeira. A mesma sequência de bytes pode ter Assets de proprietários diferentes, compartilhando um Blob físico.
 
-Um reenvio da mesma conta preserva ID, nome, data de upload e favorito do Asset existente. Se estiver na lixeira, o caso de uso retorna `AssetInTrash` com o item da própria conta e exige restauração explícita. As ações HTTP de lixeira ainda pertencem à Fase 6. Não há `ReferenceCount` persistido. A coleta automática de Blobs sem referências pertence à Fase 6; a limpeza atual remove temporários elegíveis e tentativas de derivados abandonadas.
+Um reenvio da mesma conta preserva ID, nome editado, data de upload e favorito do Asset existente. Se estiver na lixeira, o caso de uso retorna `AssetInTrash` com o item da própria conta e exige restauração explícita. Não há `ReferenceCount` persistido. A Fase 6 implementa purge e coleta somente após confirmar ausência de qualquer Asset, incluindo a lixeira e outras contas. Estado `Deleting`, geração física distinta e limpeza sincronizada permitem retry sem apagar um reupload posterior. Os contratos de restauração, retenção e locks estão em [library.md](library.md).
 
 `BlobImage` pertence ao Blob e compartilha dimensões, captura e estado entre Assets dos mesmos bytes. Thumbnail e preview publicados usam uma geração de tentativa distinta da identidade física do original. Confirmar ambos no banco torna a imagem `Ready`; falhar nunca remove ou invalida o Blob original.
 
@@ -97,7 +97,7 @@ A validação local desta entrega utiliza Windows e PostgreSQL nativo. A execuç
 
 ## Migrations e testes
 
-`20261006114248_ContentBlobsAssets` acrescenta Blobs e Assets; `20261008112515_UploadsDurableJobs` acrescenta uploads e trabalho durável; `20261008122015_ImageMetadataAndDerivatives` acrescenta imagens e generaliza os targets dos jobs. Migrations permanecem explícitas:
+`20261006114248_ContentBlobsAssets` acrescenta Blobs e Assets; `20261008112515_UploadsDurableJobs` acrescenta uploads e trabalho durável; `20261008122015_ImageMetadataAndDerivatives` acrescenta imagens; `20261008125535_LibraryTrashAndPurge` acrescenta resultados purgados e índices de biblioteca/coleta. Migrations permanecem explícitas:
 
 ```powershell
 $env:ASPNETCORE_ENVIRONMENT = 'Development'

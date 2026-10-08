@@ -35,7 +35,7 @@ Skia aplica a orientação codificada ao renderizar os derivados. `width` e `hei
 
 O extrator lê EXIF `DateTimeOriginal`, frações de segundo válidas e offset original quando presente. `capturedAtLocal` preserva o horário de origem como `DateTimeKind.Unspecified`, armazenado em PostgreSQL `timestamp without time zone`. `capturedAtUtc` só é preenchido quando data e offset original válidos permitem conversão confiável para UTC. Offset ausente, inválido ou `-00:00` não autoriza inferir UTC pelo fuso do servidor. Registros de captura conflitantes ou metadados ilegíveis deixam a captura ausente e não impedem um preview válido.
 
-Captura não substitui `uploadedAt`. A timeline será implementada na Fase 6 e usará upload quando não houver captura UTC confiável. Localização, câmera e edição de metadados ficam para uma evolução posterior.
+Captura não substitui `uploadedAt`. A [timeline da biblioteca](library.md) usa upload quando não houver captura UTC confiável e fixa a fronteira de processamento entre páginas. Localização, câmera e edição de metadados ficam para uma evolução posterior.
 
 ## Worker e processo de imagem
 
@@ -62,7 +62,7 @@ Uma imagem reserva `2 × MaximumDerivativeBytes`: 16 MiB com os defaults. Essas 
 
 Se houver interrupção entre publicação e commit, a tentativa permanece registrada; o próximo processamento limpa a geração abandonada e usa outra. Se o commit tiver sido confirmado sem resposta, a manutenção consulta o banco e preserva a geração `Ready`. Um token de lease antigo não confirma metadados ou torna pronto um Blob em exclusão. Falhas de limpeza mantêm referências e reserva para nova manutenção.
 
-A manutenção também enfileira Blobs antigos `Ready`, reconhecidos como JPEG/PNG/WebP e sem `BlobImage`, em lotes idempotentes de até 100 por execução, inicialmente a cada minuto. Isso permite processar originais já existentes antes da migration. A rotina não coleta originais nem implementa purge; coleta de Blobs sem referências pertence à Fase 6.
+A manutenção também enfileira Blobs antigos `Ready`, reconhecidos como JPEG/PNG/WebP e sem `BlobImage`, em lotes idempotentes de até 100 por execução, inicialmente a cada minuto. Isso permite processar originais já existentes antes da migration. A rotina de imagens não coleta originais; purge e coleta pertencem à manutenção da [biblioteca](library.md). A Fase 6 protege toda execução de imagem com advisory compartilhado em conexão dedicada e adia coleta enquanto houver um processor ativo, mesmo com lease expirado. Perda dessa conexão cancela processamento; lease/conexão são revalidados antes de renderizar/publicar.
 
 ## Opções e falhas
 

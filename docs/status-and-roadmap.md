@@ -1,8 +1,8 @@
 # Nexora — estado atual e próximas etapas
 
-Atualizado em **8 de outubro de 2026**. Código de referência da Fase 5: `b4ecf15`. As fases 1 a 5 foram verificadas localmente no Windows com PostgreSQL nativo; a operação no Arch continua pendente.
+Atualizado em **8 de outubro de 2026**. Código de referência da Fase 6: `e27ca91`. As fases 1 a 6 foram verificadas localmente no Windows com PostgreSQL nativo; a operação no Arch continua pendente.
 
-O Nexora já tem fundação, autenticação, armazenamento com deduplicação e arquivos por API, além de metadados, thumbnails e previews de imagens na Fase 5. A próxima entrega é a Fase 6, com timeline, favoritos e lixeira. Produção no Arch e clientes dependem das fases seguintes.
+O Nexora já tem fundação, autenticação, armazenamento com deduplicação, arquivos/imagens por API e biblioteca com timeline, favoritos, renomeação, lixeira, restauração e coleta segura. A próxima entrega é a Fase 7, com operação no Arch e restauração de backup. Clientes dependem das fases seguintes.
 
 ## 1. O que o projeto pretende ser
 
@@ -18,7 +18,7 @@ O desenvolvimento começa pela API. O cliente mobile virá depois, inicialmente 
 - Uma conta administrativa, sem cadastro público; biblioteca plana no MVP.
 - PostgreSQL para metadados e estados; filesystem para originais, derivados e temporários.
 - Blob representa os bytes imutáveis; Asset representa o item da biblioteca e suas permissões, nome e lixeira.
-- Conteúdo idêntico reutiliza o Asset existente, preservando seus metadados. Um item na lixeira exige restauração explícita; os endpoints de lixeira serão introduzidos na Fase 6.
+- Conteúdo idêntico reutiliza o Asset existente, preservando seus metadados. Um item na lixeira exige restauração explícita pelas rotas da Fase 6.
 - O servidor será confiável e poderá ler os originais para processamento.
 - Thumbnails e previews processam JPEG, PNG e WebP estáticos. Outros formatos, animações e imagens acima dos limites continuam disponíveis como originais.
 - Segurança, testes e recuperação acompanharão cada fase; operação em produção será validada na Fase 7.
@@ -35,7 +35,7 @@ Os detalhes técnicos e as razões dessas decisões estão em [architecture.md](
 | 3 — Armazenamento | Concluída | Blob/Asset, adaptador local, streaming, SHA-256 e deduplicação interna. |
 | 4 — Arquivos utilizáveis | Concluída | Upload retomável, Worker durável, biblioteca básica, download e capacidade. |
 | 5 — Imagens | Concluída localmente | Metadados, orientação, thumbnails/previews PNG e processamento com limites. |
-| 6 — Biblioteca | Próxima; não iniciada | Timeline, favoritos, lixeira, restauração e limpeza definitiva segura. |
+| 6 — Biblioteca | Concluída localmente | Timeline, favoritos, renomeação, lixeira, restauração e limpeza definitiva segura. |
 | 7 — Operação | Pendente | Arch/systemd, Tailscale/HTTPS, revisão de segurança e restauração de backup. |
 | 8 — Mobile futuro | Pendente | Contrato de sincronização e cliente MAUI Android; iOS depois. |
 
@@ -122,6 +122,20 @@ Os [contratos de armazenamento](storage.md) detalham essa fundação. A Fase 4 a
 
 **Aceite verificado localmente:** restore com dependências travadas, build Release sem avisos/erros, migration aplicada ao banco de desenvolvimento e 189 testes aprovados (50 unitários e 139 de integração), sem falhas ou ignorados. A suíte verifica JPEG/PNG/WebP no processo filho, EXIF sem fuso e com offset persistido no banco e exposto pela API, timeout com preservação do original, renovação real de lease e reversão/reaplicação da migration em banco isolado. API e Worker iniciaram pela CLI; live/readiness responderam `200`, OpenAPI incluiu os derivados e suas rotas recusaram acesso sem autenticação. Os [contratos de imagem](images.md) detalham campos, configuração e recuperação. Execução nativa Skia/Linux, limites de serviço, reinícios reais e restauração no Arch continuam pendentes na Fase 7. O processo filho mantém as permissões do Worker e a medição de memória é amostrada: esta entrega não equivale a sandbox de SO ou teto rígido de memória nativa.
 
+### Fase 6 — Biblioteca, timeline e lixeira
+
+- [x] Timeline com captura UTC confiável ou fallback para upload, filtros de imagem/favorito e cursor vinculado à conta/consulta.
+- [x] Watermark para uploads novos e EXIF processado entre páginas, com desempate por UUID.
+- [x] `PATCH /api/assets/{id}` para nome/favorito, com validação estrita de JSON e preservação da identidade.
+- [x] Exclusão lógica idempotente, listagem da lixeira e restauração explícita; conteúdo/derivados ocultos na lixeira.
+- [x] Retenção configurável de 30 dias, purge em lotes e referência de outras contas/lixeira preservada.
+- [x] Coleta por intenção `Deleting`, sincronização física antes do cascade e retry após falha de exclusão.
+- [x] Locks coordenando restauração/purge e deduplicação/coleta; conexão compartilhada protegendo processamento ativo de imagens, inclusive após lease expirar.
+- [x] Histórico de uploads concluídos com `resultPurgedAt`, sem recriar resultado após purge.
+- [x] Migration `20261008125535_LibraryTrashAndPurge`, incluindo recusa de reversão quando resultados já foram purgados.
+
+**Aceite verificado localmente:** restore travado, build Release sem avisos/erros e 229 testes aprovados (60 unitários, 169 de integração), sem falhas/ignorados. Testes incluem duas contas, payloads inválidos, captura/fallback e EXIF tardio, paginação, retenção exata, corridas com locks PostgreSQL reais, exclusão interrompida, nova geração de reupload, processamento com lease expirado e cancelamento por perda da conexão do guard. Migration aplicada ao banco local de desenvolvimento. API e Worker iniciaram pela CLI; live/readiness retornaram 200, OpenAPI documentou edição/filtros/lixeira e rotas privadas retornaram 401 sem autenticação. Contratos e limites estão em [library.md](library.md); reinícios reais, restauração e filesystem nativo no Arch permanecem na Fase 7. Paginação limita uploads/processamento novos, mas favoritos/exclusões/restaurações refletem mudanças atuais.
+
 ### Superfície HTTP disponível
 
 | Método | Rota | Finalidade |
@@ -141,12 +155,16 @@ Os [contratos de armazenamento](storage.md) detalham essa fundação. A Fase 4 a
 | `DELETE` | `/api/uploads/{id}` | Cancelar sessão elegível. |
 | `GET` | `/api/assets` | Listar biblioteca ativa com paginação por cursor. |
 | `GET` | `/api/assets/{id}` | Consultar metadados do item ativo. |
+| `PATCH` | `/api/assets/{id}` | Renomear e/ou editar favorito do item ativo. |
+| `DELETE` | `/api/assets/{id}` | Mover para a lixeira sem apagar os bytes. |
+| `GET` | `/api/trash` | Listar a lixeira com cursor. |
+| `POST` | `/api/trash/{id}/restore` | Restaurar explicitamente item não purgado. |
 | `GET`, `HEAD` | `/api/assets/{id}/content` | Baixar original ou consultar headers, com Range/ETag. |
 | `GET`, `HEAD` | `/api/assets/{id}/thumbnail` | Servir thumbnail PNG pronto e autorizado, com Range/ETag. |
 | `GET`, `HEAD` | `/api/assets/{id}/preview` | Servir preview PNG pronto e autorizado, com Range/ETag. |
 | `GET` | `/api/storage` | Consultar tamanhos lógicos, consumo físico, reservas e volume. |
 
-Os contratos e códigos de erro estão em [authentication.md](authentication.md), [uploads.md](uploads.md) e [images.md](images.md).
+Os contratos e códigos de erro estão em [authentication.md](authentication.md), [uploads.md](uploads.md), [images.md](images.md) e [library.md](library.md).
 
 ### Evidência registrada
 
@@ -160,25 +178,14 @@ Os contratos e códigos de erro estão em [authentication.md](authentication.md)
 | Validação da Fase 4, em 8 de outubro de 2026 | Restore em locked mode; build Release com zero avisos/erros; 129 testes aprovados: 39 unitários e 90 de integração, zero falhas e zero ignorados. |
 | Imagens e derivados | Commit `b4ecf15`; migration `20261008122015_ImageMetadataAndDerivatives` aplicada ao banco local de desenvolvimento. |
 | Validação da Fase 5, em 8 de outubro de 2026 | Restore em locked mode; build Release com zero avisos/erros; 189 testes aprovados: 50 unitários e 139 de integração, zero falhas e zero ignorados; API/Worker e health checks verificados pela CLI. |
+| Biblioteca, timeline e lixeira | Commit `e27ca91`; migration `20261008125535_LibraryTrashAndPurge` aplicada ao banco local de desenvolvimento. |
+| Validação da Fase 6, em 8 de outubro de 2026 | Restore travado; build Release com zero avisos/erros; 229 testes aprovados: 60 unitários e 169 de integração, zero falhas e zero ignorados. |
 
-Os resultados das fases 3, 4 e 5 são do Windows com PostgreSQL nativo. Para verificar outra revisão, execute os comandos de [development.md](development.md) e registre o novo resultado.
+Os resultados das fases 3 a 6 são do Windows com PostgreSQL nativo. Para verificar outra revisão, execute os comandos de [development.md](development.md) e registre o novo resultado.
 
 ## 4. Etapas que faltam
 
 As listas abaixo são trabalho planejado. Cada fase só será concluída após implementar suas entregas e verificar os critérios de aceite.
-
-### Fase 6 — Biblioteca, timeline e lixeira
-
-Depende da biblioteca básica, dos metadados e das rotinas do Worker.
-
-- [ ] Implementar timeline de imagens com ordenação por captura/upload e paginação por cursor.
-- [ ] Implementar favoritos e as alterações de metadados previstas em `PATCH /api/assets/{id}`.
-- [ ] Implementar exclusão lógica em `DELETE /api/assets/{id}` e listagem em `GET /api/trash`.
-- [ ] Implementar restauração explícita em `POST /api/trash/{id}/restore`.
-- [ ] Remover Assets após a retenção configurada e coletar somente Blobs sem qualquer referência, incluindo a lixeira.
-- [ ] Coordenar restauração contra purge e criação de referência contra coleta com bloqueios no banco.
-
-**Aceite:** favoritos e timeline permanecem estáveis na paginação; exclusão lógica mantém os bytes e pode ser restaurada; duplicata na lixeira exige restauração; corridas de purge/restauração e deduplicação/coleta não removem conteúdo ainda referenciado.
 
 ### Fase 7 — Operação no servidor pessoal
 
@@ -212,7 +219,7 @@ Depende de uma API estável e da operação do backend.
 
 ## 5. Parâmetros de arquivos e defaults futuros
 
-Os parâmetros de upload e imagens estão implementados nas seções `Uploads` e `Images`. Retenção da lixeira continua futura. Validar `Storage:RootPath` e iniciar a API não cria os diretórios de conteúdo; escritas criam diretórios privados sob a raiz configurada.
+As opções estão implementadas nas seções `Uploads`, `Images` e `Library`. Validar `Storage:RootPath` e iniciar a API não cria os diretórios de conteúdo; escritas criam diretórios privados sob a raiz configurada.
 
 | Parâmetro | Default / estado |
 | --- | --- |
@@ -223,7 +230,9 @@ Os parâmetros de upload e imagens estão implementados nas seções `Uploads` e
 | Margem mínima de espaço livre | 50 GiB. |
 | Reserva de montagem | Duas vezes o tamanho declarado. |
 | Expiração de upload | 7 dias sem atividade. |
-| Retenção da lixeira | 30 dias, prevista para a Fase 6. |
+| Retenção da lixeira | 30 dias. |
+| Graça para Blob sem referências | 1 dia desde criação; intenções Staging preservadas. |
+| Manutenção da biblioteca | Lotes de 100, a cada minuto. |
 | Processamento simultâneo | Uma montagem e uma imagem por Worker, em rotinas separadas. |
 | Thumbnail / preview | Lado máximo de 256 / 1280 px, PNG, sem ampliação. |
 | Entrada / pixels de imagem | 32 MiB / 24.000.000 pixels. |
@@ -257,3 +266,4 @@ Ao concluir um incremento:
 | [Armazenamento](storage.md) | Consultar importação interna, deduplicação, publicação e recuperação por reenvio. |
 | [Uploads e Worker](uploads.md) | Integrar chunks, retomada, finalização, biblioteca/download e capacidade. |
 | [Imagens e derivados](images.md) | Integrar metadados, estados e PNGs autorizados; consultar limites, processamento e recuperação. |
+| [Biblioteca e lixeira](library.md) | Integrar filtros, timeline, edição, restauração e conhecer retenção/coleta. |

@@ -59,7 +59,7 @@ Após interrupção, consulte a sessão e envie somente os índices faltantes. `
 
 O cliente consulta `GET /api/uploads/{id}` até o estado terminal. Em sucesso, `result` contém o Asset, que pode ser o item previamente existente da mesma conta. Deduplicação preserva ID, nome original, data de upload e favorito desse item. O resultado não distingue criação de reutilização por um campo adicional.
 
-Se uma duplicata estiver na lixeira, a finalização registra `Failed` e `failureCode: asset_in_trash`; não restaura o item. O job pode estar `Succeeded`, pois terminou a decisão de negócio. A restauração HTTP será acrescentada na Fase 6. Não há endpoint para reiniciar uma sessão terminal que falhou: examine o código de falha e, quando apropriado, crie uma nova sessão.
+Se uma duplicata estiver na lixeira, a finalização registra `Failed` e `failureCode: asset_in_trash`; não restaura o item. O job pode estar `Succeeded`, pois terminou a decisão de negócio. Restaure explicitamente por `POST /api/trash/{id}/restore`, conforme [library.md](library.md). Não há endpoint para reiniciar uma sessão terminal que falhou: examine o código de falha e, quando apropriado, crie uma nova sessão. Quando um resultado concluído for purgado após retenção, o upload permanece `Completed`, com `result: null` e `resultPurgedAt`; repetir conclusão não recria o Asset.
 
 Cancelar uma sessão `Open` ou `Finalizing` invalida a conclusão pelo Worker. O cancelamento disputa o mesmo bloqueio da confirmação final; se o arquivo já foi concluído, retorna `409`. Cancelar novamente uma sessão já cancelada é idempotente. Reservas não são liberadas no instante da resposta: permanecem até a manutenção remover todos os temporários elegíveis. Revogar um dispositivo impede novas requisições autenticadas; isso não cancela automaticamente os uploads já registrados.
 
@@ -89,7 +89,7 @@ Listagem, detalhes e conteúdo incluem somente Assets ativos da própria conta c
 
 Originais usam `application/octet-stream`, `Content-Disposition: attachment` e `X-Content-Type-Options: nosniff`. O nome do Asset aparece no download, nunca no caminho físico. O stream suporta `Range`, `If-Range`, `If-None-Match` e `If-Modified-Since` pela implementação nativa do ASP.NET Core, com `206`, `304` e `416` conforme a requisição. `HEAD` consulta os headers sem transferir os bytes. O ETag identifica a geração Blob e `Last-Modified` usa a data do Asset. Requisições `/api/*` recebem `Cache-Control: no-store`.
 
-Snapshots de Asset incluem `image` opcional, com estado, metadados e disponibilidade de thumbnail e preview. O upload concluído pode anteceder o processamento da imagem. Os derivados PNG autenticados por GET/HEAD, Range e ETag estão em [images.md](images.md). Favoritos, edição, exclusão lógica, restauração e timeline entram na Fase 6.
+Snapshots de Asset incluem `image` opcional, com estado, metadados e existência de thumbnail/preview. O upload concluído pode anteceder o processamento da imagem. Os derivados PNG autenticados por GET/HEAD, Range e ETag estão em [images.md](images.md). Filtros, timeline, favoritos, edição e lixeira estão em [library.md](library.md); itens na lixeira não permitem abrir originais ou derivados.
 
 ## Worker e fronteiras de recuperação
 
@@ -142,4 +142,4 @@ As migrations são sempre explícitas. A migration `20261008112515_UploadsDurabl
 
 Um fluxo de verificação usa login, criação, envio fora de ordem, consulta/retomada, conclusão `202`, polling, listagem e download/Range; um reenvio igual retorna o mesmo Asset. Testes também exercitam concorrência, cancelamento, leases expirados, falhas entre filesystem/banco, limpeza antes da liberação de reserva e isolamento por proprietário. O resultado da execução da entrega está em [status-and-roadmap.md](status-and-roadmap.md).
 
-A validação local usa Windows e PostgreSQL nativo. Execução nativa no Arch, reinício real de serviços/servidor, queda de energia, systemd, Tailscale e restauração de backup permanecem pendentes na Fase 7. Falhas injetadas e recuperação de lease verificam as transições do software, mas não comprovam durabilidade física do volume de produção. Jobs de imagem estão descritos em [images.md](images.md); coleta de Blobs sem referências permanece para a Fase 6.
+A validação local usa Windows e PostgreSQL nativo. Execução nativa no Arch, reinício real de serviços/servidor, queda de energia, systemd, Tailscale e restauração de backup permanecem pendentes na Fase 7. Falhas injetadas e recuperação de lease verificam transições do software, mas não comprovam durabilidade física do volume de produção. Jobs de imagem estão em [images.md](images.md), e a coleta de Blobs sem referências em [library.md](library.md).

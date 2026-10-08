@@ -2,9 +2,9 @@
 
 Nuvem privada para fotos, vídeos e arquivos pessoais, construída com .NET 10, ASP.NET Core, EF Core e PostgreSQL 18. O destino de produção é um servidor Arch Linux, com systemd e acesso privado por Tailscale.
 
-## Estado atual: Fase 5
+## Estado atual: Fase 6
 
-A API inclui autenticação com Identity, tokens opacos, sessões e revogação de dispositivos, além de configuração validada, PostgreSQL, migrations e health checks. Arquivos podem ser enviados em chunks retomáveis, finalizados pelo Worker, listados e baixados com HTTP Range. JPEG, PNG e WebP estáticos recebem metadados, orientação corrigida, thumbnail e preview autenticados. Blob/Asset mantêm armazenamento imutável, SHA-256 e deduplicação; falha de imagem preserva o original. A conta administrativa é criada somente por comando local. A Fase 5 foi validada localmente no Windows; a Fase 6 acrescentará timeline, favoritos e lixeira.
+A API inclui autenticação com Identity, tokens opacos, sessões e revogação de dispositivos, além de configuração validada, PostgreSQL, migrations e health checks. Arquivos podem ser enviados em chunks retomáveis, finalizados pelo Worker, listados e baixados com HTTP Range. JPEG, PNG e WebP estáticos recebem metadados, orientação corrigida, thumbnail e preview autenticados. A biblioteca oferece timeline, filtros, favoritos, renomeação, lixeira e restauração. O Worker remove itens após a retenção e coleta somente Blobs sem referências. Blob/Asset mantêm armazenamento imutável, SHA-256 e deduplicação; falha de imagem preserva o original. A conta administrativa é criada somente por comando local. A próxima fase prepara operação no Arch, backup e restauração.
 
 Os projetos atuais são `Nexora.Api`, `Nexora.Application`, `Nexora.Domain`, `Nexora.Infrastructure`, `Nexora.Worker`, `Nexora.UnitTests` e `Nexora.IntegrationTests`. O cliente MAUI entra na Fase 8.
 
@@ -52,6 +52,9 @@ A API de desenvolvimento escuta em `http://127.0.0.1:5100`:
 | `/api/devices` | Listagem autenticada; `DELETE /api/devices/{id}` revoga o dispositivo. |
 | `/api/uploads` | Criação autenticada de sessão; consulta, chunks, conclusão e cancelamento por ID. |
 | `/api/assets` | Biblioteca paginada; detalhes e download em `/api/assets/{id}/content`. |
+| `/api/assets?imagesOnly=true&sort=timeline` | Timeline por captura UTC confiável ou upload; filtro `isFavorite` opcional. |
+| `/api/assets/{id}` | `PATCH` edita nome/favorito; `DELETE` move para a lixeira. |
+| `/api/trash`, `/api/trash/{id}/restore` | Listagem da lixeira e restauração por `POST`. |
 | `/api/assets/{id}/thumbnail`, `/api/assets/{id}/preview` | Derivados PNG autenticados por GET/HEAD, com Range e ETag, somente quando prontos. |
 | `/api/storage` | Tamanhos lógicos, consumo físico, temporários, reservas e espaço do volume. |
 
@@ -74,5 +77,6 @@ Testes unitários, HTTP/configuração e filesystem executam sem PostgreSQL. Tes
 - [Armazenamento](docs/storage.md): identidade de conteúdo, contratos internos, publicação, deduplicação e recuperação por reenvio.
 - [Uploads e Worker](docs/uploads.md): contratos HTTP, retomada, finalização durável, download e capacidade.
 - [Imagens e derivados](docs/images.md): metadados, estados, configuração, processo nativo, publicação e recuperação.
+- [Biblioteca e lixeira](docs/library.md): timeline, filtros, edição, restauração, retenção e coleta segura.
 
 Segredos, binários PostgreSQL, dados de banco e arquivos pessoais ficam fora do repositório. Nexora é armazenamento; backups do banco e do conteúdo continuam necessários.

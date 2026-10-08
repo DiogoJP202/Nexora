@@ -1,6 +1,6 @@
 # Desenvolvimento local
 
-Execute os comandos deste guia na raiz do repositório. As fases 1 a 5 entregam fundação, autenticação, arquivos por API e processamento inicial de imagens. API e Worker são processos separados que compartilham PostgreSQL e a raiz de storage.
+Execute os comandos deste guia na raiz do repositório. As fases 1 a 6 entregam fundação, autenticação, arquivos/imagens por API e biblioteca com timeline, favoritos e lixeira. API e Worker são processos separados que compartilham PostgreSQL e a raiz de storage.
 
 ## SDK e dependências
 
@@ -170,7 +170,9 @@ O launch profile também define Development. O Worker carrega `appsettings.json`
 
 O processo executa uma montagem e uma imagem por vez em rotinas independentes, renova leases e mantém expiração/limpeza em paralelo. Sem Worker, uma conclusão permanece `Finalizing` e imagens ficam pendentes. Para interromper localmente, use Ctrl+C; um job cujo lease ficou ativo pode ser recuperado quando ele expirar. Os contratos estão em [uploads.md](uploads.md) e [images.md](images.md).
 
-Após aplicar a migration de imagens e iniciar o Worker, Blobs antigos `Ready` compatíveis, sem registro de imagem, entram automaticamente na fila em lotes de até 100 por manutenção. Para verificar a entrega, envie um JPEG/PNG/WebP estático válido, aguarde upload `Completed` e imagem `Ready`, consulte metadados e baixe `/thumbnail` e `/preview`. Verifique também `HEAD`, um Range e um original acima dos limites de imagem: a falha de processamento deve preservar seu download original. A listagem mantém ordem por upload; timeline será implementada na Fase 6.
+Após aplicar a migration de imagens e iniciar o Worker, Blobs antigos `Ready` compatíveis, sem registro de imagem, entram automaticamente na fila em lotes de até 100 por manutenção. Para verificar a entrega, envie um JPEG/PNG/WebP estático válido, aguarde upload `Completed` e imagem `Ready`, consulte metadados e baixe `/thumbnail` e `/preview`. Verifique também `HEAD`, um Range e um original acima dos limites de imagem: a falha de processamento deve preservar seu download original. A listagem mantém ordem por upload por padrão; `imagesOnly=true&sort=timeline` consulta a timeline.
+
+A migration `20261008125535_LibraryTrashAndPurge` acrescenta histórico de resultados purgados e índices de biblioteca/coleta. O Worker também mantém lixeira e coleta Blobs sem referências. Configure `Library` igualmente nos serviços; veja [library.md](library.md) para defaults, filtros, edição e restauração. Para verificar sem aguardar retenção, use os testes isolados com relógio controlado. Não diminua retenção em um storage pessoal apenas para acelerar teste: isso antecipa exclusões definitivas. Reverter a migration após resultados purgados exige backup consistente; o `Down` recusa essa perda de histórico.
 
 O filho `render-image` é iniciado automaticamente, recebe somente parâmetros/bytes por pipes e executa com a credencial do Worker. Watchdogs limitam tempo, protocolo e working set observado; o heap gerenciado tem limite próprio. Isso não é uma sandbox de SO nem um limite rígido de memória nativa. Publique/instale o Worker com todos os arquivos de saída e dependências nativas. Isolamento e `MemoryMax` de serviço serão preparados e testados no Arch na Fase 7.
 
