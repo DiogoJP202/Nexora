@@ -12,6 +12,17 @@ internal static class LinuxDirectoryDurability
     private const int CurrentWorkingDirectory = -100;
     private const uint RenameNoReplace = 1;
 
+    internal static void RequireExclusiveLock(FileStream stream)
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        int result;
+        do { result = Flock(stream.SafeFileHandle, 2 | 4); }
+        while (result == -1 && Marshal.GetLastPInvokeError() == InterruptedSystemCall);
+        if (result != 0)
+            throw new IOException("Unable to exclusively lock the storage attempt.",
+                new Win32Exception(Marshal.GetLastPInvokeError()));
+    }
+
     internal static void MoveNew(string source, string destination)
     {
         // No .NET cross-device copy fallback and no race between an existence check and rename.
@@ -63,6 +74,9 @@ internal static class LinuxDirectoryDurability
 
     [DllImport("libc", EntryPoint = "fsync", SetLastError = true)]
     private static extern int Fsync(SafeFileHandle descriptor);
+
+    [DllImport("libc", EntryPoint = "flock", SetLastError = true)]
+    private static extern int Flock(SafeFileHandle descriptor, int operation);
 
     [DllImport("libc", EntryPoint = "renameat2", SetLastError = true)]
     private static extern int RenameAt2(int oldDirectory,

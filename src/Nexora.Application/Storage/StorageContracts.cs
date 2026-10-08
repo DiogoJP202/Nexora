@@ -25,6 +25,19 @@ public interface ITemporaryStorage
     Task DeleteAsync(TemporaryObjectKey key, CancellationToken cancellationToken);
 }
 
+public interface ITrackedTemporaryStorage : ITemporaryStorage
+{
+    Task<TemporaryObjectInfo> CreateWithKeyAsync(TemporaryObjectKey key, Stream content, long maximumLength,
+        CancellationToken cancellationToken);
+    Task DeleteAttemptAsync(TemporaryObjectKey key, bool preserveCompleted, CancellationToken cancellationToken);
+}
+
+public interface ITrackedBlobStorage : IBlobStorage
+{
+    Task<BlobPublicationResult> PublishWithAttemptAsync(BlobStorageKey key, TemporaryObjectKey attemptKey,
+        Stream content, long expectedLength, string expectedSha256, CancellationToken cancellationToken);
+}
+
 public sealed class StorageIntegrityException : IOException
 {
     public StorageIntegrityException() : base("The content does not match its recorded identity.") { }

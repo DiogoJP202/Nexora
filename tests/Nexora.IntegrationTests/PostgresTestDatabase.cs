@@ -22,6 +22,10 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         {
             Database = "postgres",
             Pooling = false,
+            // Database DDL can wait for checkpoints and filesystem cleanup while
+            // other fixtures migrate. Keep its bounded deadline independent of
+            // the application's intentionally short query timeout.
+            CommandTimeout = 60,
             ApplicationName = "Nexora.IntegrationTests"
         };
         _maintenanceConnectionString = maintenance.ConnectionString;
@@ -103,7 +107,7 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         await using var connection = new NpgsqlConnection(_maintenanceConnectionString);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = $"DROP DATABASE {QuotedOwnDatabaseName()} WITH (FORCE)";
+        command.CommandText = $"DROP DATABASE IF EXISTS {QuotedOwnDatabaseName()} WITH (FORCE)";
         await command.ExecuteNonQueryAsync();
         _created = false;
     }

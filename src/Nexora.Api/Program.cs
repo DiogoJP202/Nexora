@@ -2,12 +2,15 @@ using System.Net;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 using Nexora.Api.Administration;
 using Nexora.Api.Endpoints;
 using Nexora.Api.Security;
 using Nexora.Application.Authentication;
 using Nexora.Infrastructure;
+using Nexora.Infrastructure.Configuration;
 
 var administrationCommand = args.FirstOrDefault() is "bootstrap-admin" or "reset-admin-password"
     ? args[0] : null;
@@ -38,7 +41,8 @@ builder.Services.AddProblemDetails(options =>
             StatusCodes.Status403Forbidden => "access_denied",
             StatusCodes.Status404NotFound => "resource_not_found",
             StatusCodes.Status405MethodNotAllowed => "method_not_allowed",
-            StatusCodes.Status413PayloadTooLarge => "request_too_large",
+            StatusCodes.Status413PayloadTooLarge => context.HttpContext.GetEndpoint()?.Metadata.GetMetadata<ChunkBodyLimitMetadata>() is not null
+                ? "chunk_too_large" : "request_too_large",
             StatusCodes.Status429TooManyRequests => "rate_limited",
             StatusCodes.Status503ServiceUnavailable => "service_unavailable",
             StatusCodes.Status500InternalServerError => "internal_error",
@@ -101,6 +105,7 @@ if (administrationCommand is not null)
 }
 
 app.UseForwardedHeaders();
+app.UseRouting();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.Use(async (context, next) =>
@@ -114,9 +119,15 @@ app.Use(async (context, next) =>
                 "HTTPS é obrigatório.").ExecuteAsync(context);
             return;
         }
-        if (context.Request.ContentLength > 16 * 1024)
+        var isChunk = context.GetEndpoint()?.Metadata.GetMetadata<ChunkBodyLimitMetadata>() is not null;
+        var bodyLimit = isChunk
+            ? context.RequestServices.GetRequiredService<IOptions<UploadOptions>>().Value.ChunkSizeBytes
+            : 16 * 1024;
+        var sizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (sizeFeature is { IsReadOnly: false }) sizeFeature.MaxRequestBodySize = bodyLimit;
+        if (context.Request.ContentLength > bodyLimit)
         {
-            await ApiProblems.Result(StatusCodes.Status413PayloadTooLarge, "request_too_large",
+            await ApiProblems.Result(StatusCodes.Status413PayloadTooLarge, isChunk ? "chunk_too_large" : "request_too_large",
                 "O corpo da requisição excede o limite.").ExecuteAsync(context);
             return;
         }
@@ -130,6 +141,8 @@ app.UseAuthorization();
 app.MapHealthEndpoints();
 app.MapAuthenticationEndpoints();
 app.MapDeviceEndpoints();
+app.MapUploadEndpoints();
+app.MapAssetEndpoints();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi().AllowAnonymous();

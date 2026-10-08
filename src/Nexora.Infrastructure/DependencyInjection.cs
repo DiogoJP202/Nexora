@@ -8,7 +8,9 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Nexora.Application.Authentication;
 using Nexora.Application.Content;
+using Nexora.Application.Jobs;
 using Nexora.Application.Storage;
+using Nexora.Application.Uploads;
 using Nexora.Infrastructure.Authentication;
 using Nexora.Infrastructure.Configuration;
 using Nexora.Infrastructure.Content;
@@ -16,6 +18,7 @@ using Nexora.Infrastructure.HealthChecks;
 using Nexora.Infrastructure.Identity;
 using Nexora.Infrastructure.Persistence;
 using Nexora.Infrastructure.Storage;
+using Nexora.Infrastructure.Uploads;
 
 namespace Nexora.Infrastructure;
 
@@ -27,6 +30,9 @@ public static class DependencyInjection
         services.AddOptions<StorageOptions>()
             .Bind(configuration.GetSection(StorageOptions.SectionName))
             .ValidateOnStart();
+
+        services.AddSingleton<IValidateOptions<UploadOptions>, UploadOptionsValidator>();
+        services.AddOptions<UploadOptions>().Bind(configuration.GetSection(UploadOptions.SectionName)).ValidateOnStart();
 
         services.AddSingleton<IValidateOptions<DatabaseOptions>, DatabaseOptionsValidator>();
         services.AddOptions<DatabaseOptions>()
@@ -76,10 +82,23 @@ public static class DependencyInjection
         services.AddSingleton<DummyPasswordVerifier>();
         services.AddScoped<IAuthenticationService, AuthenticationService>();
         services.AddScoped<IAccountAdministration, AccountAdministrationService>();
-        services.AddSingleton<IBlobStorage, LocalFileBlobStorage>();
-        services.AddSingleton<ITemporaryStorage, LocalFileTemporaryStorage>();
+        services.AddSingleton<LocalFileBlobStorage>();
+        services.AddSingleton<IBlobStorage>(provider => provider.GetRequiredService<LocalFileBlobStorage>());
+        services.AddSingleton<ITrackedBlobStorage>(provider => provider.GetRequiredService<LocalFileBlobStorage>());
+        services.AddSingleton<LocalFileTemporaryStorage>();
+        services.AddSingleton<ITemporaryStorage>(provider => provider.GetRequiredService<LocalFileTemporaryStorage>());
+        services.AddSingleton<ITrackedTemporaryStorage>(provider => provider.GetRequiredService<LocalFileTemporaryStorage>());
         services.AddScoped<IContentCatalog, PostgresContentCatalog>();
         services.AddScoped<IAssetIngestionService, AssetIngestionService>();
+        services.AddScoped<IUploadContentCatalog, PostgresContentCatalog>();
+        services.AddScoped<IStagedAssetIngestionService, StagedAssetIngestionService>();
+        services.AddScoped<IUploadService, PostgresUploadService>();
+        services.AddScoped<IUploadWorkStore, PostgresUploadWorkStore>();
+        services.AddScoped<IUploadJobProcessor, UploadJobProcessor>();
+        services.AddScoped<IAssetLibrary, PostgresAssetLibrary>();
+        services.AddScoped<IStorageStatusService, PostgresStorageStatusService>();
+        services.AddSingleton<IStorageUsageReader, LocalStorageUsageReader>();
+        services.AddSingleton<IStorageHousekeeping, LocalStorageHousekeeping>();
 
         services.AddHealthChecks().AddCheck<DatabaseReadinessHealthCheck>(
             "database",

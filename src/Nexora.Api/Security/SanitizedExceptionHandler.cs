@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Nexora.Api.Endpoints;
+using Nexora.Application.Storage;
+using Nexora.Application.Uploads;
 using Npgsql;
 
 namespace Nexora.Api.Security;
@@ -16,8 +18,11 @@ internal sealed class SanitizedExceptionHandler(ILogger<SanitizedExceptionHandle
         }
         var status = exception switch
         {
+            UploadOperationException upload => upload.StatusCode,
+            StorageLimitExceededException => StatusCodes.Status413PayloadTooLarge,
             BadHttpRequestException badRequest => badRequest.StatusCode,
             _ when IsDatabaseFailure(exception) => StatusCodes.Status503ServiceUnavailable,
+            IOException => StatusCodes.Status503ServiceUnavailable,
             _ => StatusCodes.Status500InternalServerError
         };
         // Provider messages can contain credentials or personal data; never log the exception object.
@@ -25,10 +30,11 @@ internal sealed class SanitizedExceptionHandler(ILogger<SanitizedExceptionHandle
             "Request failed. Type {ExceptionType}, status {Status}, trace {TraceId}",
             exception.GetType().Name, status, context.TraceIdentifier);
         ApiProblems.NoStore(context);
-        await ApiProblems.Result(status, status switch
+        await ApiProblems.Result(status, exception is UploadOperationException refused ? refused.Code : status switch
         {
             400 => "invalid_request",
-            413 => "request_too_large",
+            413 => context.GetEndpoint()?.Metadata.GetMetadata<ChunkBodyLimitMetadata>() is not null
+                ? "chunk_too_large" : "request_too_large",
             503 => "service_unavailable",
             _ => "internal_error"
         }, "Não foi possível atender a requisição.").ExecuteAsync(context);

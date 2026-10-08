@@ -163,7 +163,19 @@ public sealed class HealthAndConfigurationTests
 
         var error = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
 
-        Assert.Contains("DataProtection:KeyDirectory", error.ToString());
+        if (error is ObjectDisposedException)
+        {
+            // RunAsync disposes a failed host before WebApplicationFactory can
+            // observe its startup exception. Require the original validation
+            // failure logged by Host.StartAsync, rather than any disposal error.
+            Assert.Contains("Hosting failed to start", factory.CapturedLogs.Text);
+            Assert.Contains("OptionsValidationException", factory.CapturedLogs.Text);
+            Assert.Contains("DataProtection:KeyDirectory", factory.CapturedLogs.Text);
+        }
+        else
+        {
+            Assert.Contains("DataProtection:KeyDirectory", error.ToString());
+        }
     }
 
     internal static async Task AssertHealthResponseAsync(HttpResponseMessage response, string status)

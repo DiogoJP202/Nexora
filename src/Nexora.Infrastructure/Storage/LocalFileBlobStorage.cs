@@ -5,7 +5,7 @@ using Nexora.Infrastructure.Configuration;
 
 namespace Nexora.Infrastructure.Storage;
 
-public sealed class LocalFileBlobStorage : IBlobStorage
+public sealed class LocalFileBlobStorage : ITrackedBlobStorage
 {
     private readonly StorageFileSystem fileSystem;
 
@@ -15,7 +15,12 @@ public sealed class LocalFileBlobStorage : IBlobStorage
         fileSystem = new StorageFileSystem(options.Value.RootPath);
     }
 
-    public async Task<BlobPublicationResult> PublishAsync(BlobStorageKey key, Stream content,
+    public Task<BlobPublicationResult> PublishAsync(BlobStorageKey key, Stream content,
+        long expectedLength, string expectedSha256, CancellationToken cancellationToken)
+        => PublishWithAttemptAsync(key, new TemporaryObjectKey(Guid.NewGuid()), content, expectedLength,
+            expectedSha256, cancellationToken);
+
+    public async Task<BlobPublicationResult> PublishWithAttemptAsync(BlobStorageKey key, TemporaryObjectKey attemptKey, Stream content,
         long expectedLength, string expectedSha256, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(content);
@@ -23,7 +28,18 @@ public sealed class LocalFileBlobStorage : IBlobStorage
         StoredContentInspector.ValidateExpectedHash(expectedSha256);
         cancellationToken.ThrowIfCancellationRequested();
         var destination = fileSystem.ResolveFile(key.ToString(), createParents: true);
-        var partial = fileSystem.ResolveFile($"temp/{Guid.NewGuid():N}.publishing", createParents: true);
+        if (fileSystem.GetLength(destination) is not null)
+        {
+            // A retry after an ambiguous publication must not allocate a third full copy.
+            var identity = await StoredContentInspector.InspectAsync(content, destination: null, expectedLength,
+                enforceIdentityLength: true, cancellationToken);
+            if (identity.Length != expectedLength || identity.Sha256 != expectedSha256)
+                throw new StorageIntegrityException();
+            await VerifyExistingAsync(destination, expectedLength, expectedSha256, cancellationToken);
+            fileSystem.FlushDirectory(Path.GetDirectoryName(destination)!);
+            return BlobPublicationResult.AlreadyExists;
+        }
+        var partial = fileSystem.ResolveFile($"temp/{attemptKey}.publishing", createParents: true);
         var ownsPartial = false;
         try
         {

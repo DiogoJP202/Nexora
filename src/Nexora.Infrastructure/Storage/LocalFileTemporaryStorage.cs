@@ -4,7 +4,7 @@ using Nexora.Infrastructure.Configuration;
 
 namespace Nexora.Infrastructure.Storage;
 
-public sealed class LocalFileTemporaryStorage : ITemporaryStorage
+public sealed class LocalFileTemporaryStorage : ITrackedTemporaryStorage
 {
     private readonly StorageFileSystem fileSystem;
 
@@ -14,13 +14,16 @@ public sealed class LocalFileTemporaryStorage : ITemporaryStorage
         fileSystem = new StorageFileSystem(options.Value.RootPath);
     }
 
-    public async Task<TemporaryObjectInfo> CreateAsync(Stream content, long maximumLength,
+    public Task<TemporaryObjectInfo> CreateAsync(Stream content, long maximumLength,
+        CancellationToken cancellationToken)
+        => CreateWithKeyAsync(new TemporaryObjectKey(Guid.NewGuid()), content, maximumLength, cancellationToken);
+
+    public async Task<TemporaryObjectInfo> CreateWithKeyAsync(TemporaryObjectKey key, Stream content, long maximumLength,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(content);
         ArgumentOutOfRangeException.ThrowIfNegative(maximumLength);
         cancellationToken.ThrowIfCancellationRequested();
-        var key = new TemporaryObjectKey(Guid.NewGuid());
         var destination = fileSystem.ResolveFile($"temp/{key}.chunk", createParents: true);
         var partial = fileSystem.ResolveFile($"temp/{key}.part", createParents: true);
         var ownsPartial = false;
@@ -85,6 +88,18 @@ public sealed class LocalFileTemporaryStorage : ITemporaryStorage
         cancellationToken.ThrowIfCancellationRequested();
         var path = fileSystem.ResolveFile($"temp/{key}.chunk", createParents: false);
         fileSystem.Delete(path);
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteAttemptAsync(TemporaryObjectKey key, bool preserveCompleted, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        foreach (var extension in new[] { ".part", ".publishing", ".chunk" })
+        {
+            if (preserveCompleted && extension == ".chunk") continue;
+            var path = fileSystem.ResolveFile($"temp/{key}{extension}", createParents: false);
+            fileSystem.DeleteInactive(path);
+        }
         return Task.CompletedTask;
     }
 }

@@ -3,13 +3,18 @@ using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Nexora.Application.Content;
+using Nexora.Application.Jobs;
 using Nexora.Application.Storage;
+using Nexora.Application.Uploads;
 using Nexora.Domain.Content;
+using Nexora.Domain.Uploads;
 using Nexora.Infrastructure.Persistence;
+using Nexora.Infrastructure.Uploads;
 
 namespace Nexora.Infrastructure.Content;
 
-public sealed class PostgresContentCatalog(NexoraDbContext db, ILogger<PostgresContentCatalog> logger) : IContentCatalog
+public sealed class PostgresContentCatalog(NexoraDbContext db, ILogger<PostgresContentCatalog> logger, TimeProvider clock)
+    : IContentCatalog, IUploadContentCatalog
 {
     private static readonly EventId BlobStaged = new(3001, "BlobStaged");
     private static readonly EventId AssetCreated = new(3002, "AssetCreated");
@@ -95,6 +100,69 @@ public sealed class PostgresContentCatalog(NexoraDbContext db, ILogger<PostgresC
         await transaction.CommitAsync(cancellationToken);
         logger.LogInformation(AssetCreated, "Asset {AssetId} created for blob {BlobId} and owner {OwnerId}.", asset.Id, blob.Id, ownerId);
         return new AssetImportResult(AssetImportStatus.Created, Snapshot(asset, blob));
+    }
+
+    public async Task<AssetImportResult> CompleteUploadAsync(Guid ownerId, Guid blobId, string originalName,
+        DateTimeOffset uploadedAt, UploadCompletionContext completion, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(completion);
+        Asset.ValidateOriginalName(originalName);
+        if (uploadedAt.Offset != TimeSpan.Zero) throw new ArgumentException("The upload timestamp must be UTC.");
+        db.ChangeTracker.Clear();
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+        await UploadTransactionLock.AcquireAsync(db, completion.UploadId, cancellationToken);
+        var upload = await UploadTransactionLock.RowAsync(db, completion.UploadId, cancellationToken);
+        if (upload is null || upload.OwnerId != ownerId || upload.State != UploadState.Finalizing)
+            throw new JobLeaseLostException();
+        var job = await db.BackgroundJobs.FromSqlInterpolated($"SELECT * FROM \"BackgroundJobs\" WHERE \"Id\" = {completion.JobId} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
+        if (job is null || job.UploadSessionId != upload.Id || !job.HasLease(completion.LeaseToken, clock.GetUtcNow()))
+            throw new JobLeaseLostException();
+        if (upload.OriginalName != originalName || upload.AssemblyTemporaryId is null)
+            throw new StorageIntegrityException();
+        var hash = await db.Blobs.AsNoTracking().Where(item => item.Id == blobId).Select(item => item.Sha256)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (hash is null) throw new UploadOperationException(409, "blob_unavailable");
+        await AcquireHashLockAsync(hash, cancellationToken);
+        var blob = await db.Blobs.FromSqlInterpolated($"SELECT * FROM \"Blobs\" WHERE \"Id\" = {blobId} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
+        if (!job.HasLease(completion.LeaseToken, clock.GetUtcNow())) throw new JobLeaseLostException();
+        if (blob is null || blob.Sha256 != hash || blob.State is not (BlobState.Staging or BlobState.Ready))
+            throw new UploadOperationException(409, "blob_unavailable");
+        if (blob.Size != upload.ExpectedLength || blob.Sha256 != upload.AssemblySha256
+            || upload.AssemblyLength != upload.ExpectedLength)
+            throw new StorageIntegrityException();
+        var asset = await db.Assets.FromSqlInterpolated($"SELECT * FROM \"Assets\" WHERE \"OwnerId\" = {ownerId} AND \"BlobId\" = {blobId} FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
+        if (!job.HasLease(completion.LeaseToken, clock.GetUtcNow())) throw new JobLeaseLostException();
+        var expiration = job.LeaseExpiresAt!.Value;
+        var now = clock.GetUtcNow();
+        blob.MarkReady();
+        AssetImportStatus status;
+        if (asset?.DeletedAt is not null)
+        {
+            upload.Fail("asset_in_trash", now);
+            status = AssetImportStatus.AssetInTrash;
+        }
+        else
+        {
+            status = asset is null ? AssetImportStatus.Created : AssetImportStatus.Reused;
+            if (asset is null)
+            {
+                asset = new Asset(Guid.CreateVersion7(uploadedAt), ownerId, blob.Id, upload.OriginalName, uploadedAt);
+                db.Assets.Add(asset);
+            }
+            upload.Complete(asset.Id, now);
+        }
+        job.Succeed();
+        await db.SaveChangesAsync(cancellationToken);
+        if (expiration <= clock.GetUtcNow()) throw new JobLeaseLostException();
+        await transaction.CommitAsync(cancellationToken);
+        logger.LogInformation(status == AssetImportStatus.AssetInTrash ? AssetInTrash
+            : status == AssetImportStatus.Created ? AssetCreated : AssetReused,
+            "Upload {UploadId} and job {JobId} completed for asset {AssetId}, blob {BlobId} and owner {OwnerId} with status {Status}.",
+            upload.Id, job.Id, asset!.Id, blob.Id, ownerId, status);
+        return new AssetImportResult(status, Snapshot(asset, blob));
     }
 
     private Task AcquireHashLockAsync(string sha256, CancellationToken cancellationToken)

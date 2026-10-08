@@ -516,6 +516,12 @@
           "Npgsql.EntityFrameworkCore.PostgreSQL": "[10.0.3, )"
         }
       },
+      "nexora.worker": {
+        "type": "Project",
+        "dependencies": {
+          "Nexora.Infrastructure": "[1.0.0, )"
+        }
+      },
       "Microsoft.AspNetCore.Identity.EntityFrameworkCore": {
         "type": "CentralTransitive",
         "requested": "[10.0.12, )",

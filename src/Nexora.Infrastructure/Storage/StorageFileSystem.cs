@@ -66,7 +66,19 @@ internal sealed class StorageFileSystem
         {
             options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
         }
-        return new FileStream(path, options);
+        var stream = new FileStream(path, options);
+        try
+        {
+            // A tracked retry must never unlink bytes still held by a previous writer.
+            LinuxDirectoryDurability.RequireExclusiveLock(stream);
+            return stream;
+        }
+        catch (Exception failure)
+        {
+            stream.Dispose();
+            CleanUpOwnedFile(path, failure);
+            throw;
+        }
     }
 
     internal FileStream OpenRead(string path)
@@ -114,6 +126,25 @@ internal sealed class StorageFileSystem
         }
     }
 
+    internal void DeleteInactive(string path)
+    {
+        ValidateAbsoluteFile(path);
+        if (TryGetAttributes(path) is null)
+        {
+            Delete(path);
+            return;
+        }
+        // Windows needs delete sharing for this handle, while denying other readers/writers.
+        // On Linux, the mandatory adapter flock complements .NET's best-effort sharing.
+        using (var exclusive = new FileStream(path, FileMode.Open, FileAccess.ReadWrite,
+            OperatingSystem.IsWindows() ? FileShare.Delete : FileShare.None))
+        {
+            LinuxDirectoryDurability.RequireExclusiveLock(exclusive);
+            File.Delete(path);
+        }
+        FlushDirectory(Path.GetDirectoryName(path)!);
+    }
+
     internal void FlushMove(string source, string destination)
     {
         // Once renamed, cancellation must not skip synchronization of either changed directory.
@@ -142,6 +173,34 @@ internal sealed class StorageFileSystem
     {
         ValidateAbsoluteDirectory(path);
         LinuxDirectoryDurability.Flush(path);
+    }
+
+    internal IEnumerable<string> EnumerateFiles(string directory)
+    {
+        var probe = ResolveFile(directory + "/.inventory", createParents: false);
+        var start = Path.GetDirectoryName(probe)!;
+        if (TryGetAttributes(start) is null) yield break;
+        var pending = new Stack<string>();
+        pending.Push(start);
+        while (pending.TryPop(out var current))
+        {
+            RequireDirectory(TryGetAttributes(current));
+            foreach (var entry in Directory.EnumerateFileSystemEntries(current))
+            {
+                var attributes = TryGetAttributes(entry);
+                if (attributes is null) continue;
+                if ((attributes.Value & FileAttributes.Directory) != 0)
+                {
+                    RequireDirectory(attributes);
+                    pending.Push(entry);
+                }
+                else
+                {
+                    ValidateAbsoluteFile(entry);
+                    yield return entry;
+                }
+            }
+        }
     }
 
     private bool ValidateRoot(bool create)
