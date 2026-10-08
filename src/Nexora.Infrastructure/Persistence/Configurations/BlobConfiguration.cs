@@ -22,5 +22,6 @@ internal sealed class BlobConfiguration : IEntityTypeConfiguration<Blob>
         builder.Property(blob => blob.StorageKey).HasConversion(key => key.ToString(), value => BlobStorageKey.Parse(value)).HasMaxLength(44);
         builder.Property(blob => blob.State).HasConversion<string>().HasMaxLength(8);
         builder.HasIndex(blob => blob.Sha256).IsUnique();
+        builder.HasIndex(blob => new { blob.State, blob.CreatedAt, blob.Id });
     }
 }

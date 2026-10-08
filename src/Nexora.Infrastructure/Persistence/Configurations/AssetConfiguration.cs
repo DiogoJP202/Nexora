@@ -17,6 +17,9 @@ internal sealed class AssetConfiguration : IEntityTypeConfiguration<Asset>
         builder.HasOne(asset => asset.Blob).WithMany(blob => blob.Assets).HasForeignKey(asset => asset.BlobId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(asset => new { asset.OwnerId, asset.BlobId }).IsUnique();
         builder.HasIndex(asset => new { asset.OwnerId, asset.UploadedAt, asset.Id }).IsDescending(false, true, true);
-        builder.HasIndex(asset => new { asset.OwnerId, asset.DeletedAt });
+        builder.HasIndex(asset => new { asset.OwnerId, asset.DeletedAt, asset.Id }).IsDescending(false, true, true);
+        builder.HasIndex(asset => new { asset.DeletedAt, asset.Id }).HasFilter("\"DeletedAt\" IS NOT NULL");
+        builder.HasIndex(asset => new { asset.OwnerId, asset.IsFavorite, asset.UploadedAt, asset.Id })
+            .IsDescending(false, false, true, true).HasFilter("\"DeletedAt\" IS NULL");
     }
 }

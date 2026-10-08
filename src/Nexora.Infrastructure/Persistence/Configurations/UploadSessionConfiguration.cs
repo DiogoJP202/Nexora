@@ -17,7 +17,7 @@ internal sealed class UploadSessionConfiguration : IEntityTypeConfiguration<Uplo
             table.HasCheckConstraint("CK_UploadSessions_State", "\"State\" IN ('Open', 'Finalizing', 'Completed', 'Cancelled', 'Expired', 'Failed')");
             table.HasCheckConstraint("CK_UploadSessions_Hash", "\"ExpectedSha256\" IS NULL OR \"ExpectedSha256\" ~ '^[0-9a-f]{64}$'");
             table.HasCheckConstraint("CK_UploadSessions_Assembly", "(\"AssemblyTemporaryId\" IS NULL AND \"AssemblyLength\" IS NULL AND \"AssemblySha256\" IS NULL AND \"AssemblyMimeType\" IS NULL) OR (\"AssemblyTemporaryId\" IS NOT NULL AND \"AssemblyLength\" IS NOT NULL AND \"AssemblyLength\" = \"ExpectedLength\" AND \"AssemblySha256\" IS NOT NULL AND \"AssemblySha256\" ~ '^[0-9a-f]{64}$' AND \"AssemblyMimeType\" IS NOT NULL)");
-            table.HasCheckConstraint("CK_UploadSessions_Result", "\"State\" <> 'Completed' OR \"ResultAssetId\" IS NOT NULL");
+            table.HasCheckConstraint("CK_UploadSessions_Result", "(\"State\" = 'Completed' AND ((\"ResultAssetId\" IS NOT NULL AND \"ResultPurgedAt\" IS NULL) OR (\"ResultAssetId\" IS NULL AND \"ResultPurgedAt\" IS NOT NULL AND \"ResultPurgedAt\" >= \"LastActivityAt\"))) OR (\"State\" <> 'Completed' AND \"ResultAssetId\" IS NULL AND \"ResultPurgedAt\" IS NULL)");
             table.HasCheckConstraint("CK_UploadSessions_Activity", "\"LastActivityAt\" >= \"CreatedAt\"");
         });
         builder.HasKey(upload => upload.Id);

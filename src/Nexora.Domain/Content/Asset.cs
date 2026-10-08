@@ -42,6 +42,12 @@ public sealed class Asset
 
     public void SetFavorite(bool isFavorite) => IsFavorite = isFavorite;
 
+    public void Rename(string originalName)
+    {
+        ValidateOriginalName(originalName);
+        OriginalName = originalName;
+    }
+
     public static void ValidateOriginalName(string originalName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(originalName);

@@ -10,6 +10,8 @@ public sealed record AssetContentStream(AssetSnapshot Asset, Stream Content, Gui
 public interface IAssetLibrary
 {
     Task<AssetPage> ListAsync(Guid ownerId, int limit, string? cursor, CancellationToken cancellationToken);
+    Task<AssetPage> ListAsync(Guid ownerId, int limit, string? cursor, AssetListQuery query, CancellationToken cancellationToken);
+    Task<AssetPage> ListTrashAsync(Guid ownerId, int limit, string? cursor, CancellationToken cancellationToken);
     Task<AssetSnapshot?> FindAsync(Guid ownerId, Guid assetId, CancellationToken cancellationToken);
     Task<AssetContentStream?> OpenContentAsync(Guid ownerId, Guid assetId, CancellationToken cancellationToken);
 }

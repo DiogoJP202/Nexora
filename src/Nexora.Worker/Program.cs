@@ -33,6 +33,7 @@ internal static class WorkerProgram
         builder.Services.AddInfrastructure(builder.Configuration);
         builder.Services.AddHostedService<UploadWorker>();
         builder.Services.AddHostedService<ImageWorker>();
+        builder.Services.AddHostedService<LibraryMaintenanceWorker>();
         using var host = builder.Build();
         await host.RunAsync();
     }

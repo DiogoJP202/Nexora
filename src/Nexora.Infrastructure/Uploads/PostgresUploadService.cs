@@ -249,7 +249,7 @@ public sealed class PostgresUploadService(NexoraDbContext db, ITemporaryStorage 
                         asset.Blob.Image.State == ImageProcessingState.Ready, asset.Blob.Image.FailureCode))).SingleOrDefaultAsync(cancellationToken);
         return new UploadSnapshot(upload.Id, upload.OriginalName, upload.ExpectedLength, upload.ChunkSize, upload.ChunkCount,
             upload.State, confirmed, upload.CreatedAt, upload.LastActivityAt, result, upload.FailureCode,
-            job is null ? null : new UploadOperationSummary(job.Id, job.State, job.Attempts, job.FailureCode));
+            job is null ? null : new UploadOperationSummary(job.Id, job.State, job.Attempts, job.FailureCode), upload.ResultPurgedAt);
     }
 
     private static UploadOperationException Refuse(int statusCode, string code) => new(statusCode, code);

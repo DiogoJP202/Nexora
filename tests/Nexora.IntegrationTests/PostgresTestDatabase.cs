@@ -108,7 +108,18 @@ internal sealed class PostgresTestDatabase : IAsyncDisposable
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = $"DROP DATABASE IF EXISTS {QuotedOwnDatabaseName()} WITH (FORCE)";
-        await command.ExecuteNonQueryAsync();
+        // Autovacuum can briefly own a superuser backend in this fixture database.
+        // An ordinary CREATEDB role cannot terminate it with FORCE. Retry that
+        // specific transient failure, without broadening role permissions.
+        for (var attempt = 0; ; attempt++)
+        {
+            try { await command.ExecuteNonQueryAsync(); break; }
+            catch (PostgresException error) when (attempt < 20 && error.SqlState == "42501"
+                && error.MessageText == "permission denied to terminate process")
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250));
+            }
+        }
         _created = false;
     }
 

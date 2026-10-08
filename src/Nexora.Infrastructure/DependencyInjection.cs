@@ -39,6 +39,9 @@ public static class DependencyInjection
         services.AddSingleton<IValidateOptions<ImageOptions>, ImageOptionsValidator>();
         services.AddOptions<ImageOptions>().Bind(configuration.GetSection(ImageOptions.SectionName)).ValidateOnStart();
 
+        services.AddSingleton<IValidateOptions<LibraryOptions>, LibraryOptionsValidator>();
+        services.AddOptions<LibraryOptions>().Bind(configuration.GetSection(LibraryOptions.SectionName)).ValidateOnStart();
+
         services.AddSingleton<IValidateOptions<DatabaseOptions>, DatabaseOptionsValidator>();
         services.AddOptions<DatabaseOptions>()
             .Bind(configuration.GetSection(DatabaseOptions.SectionName))
@@ -103,9 +106,11 @@ public static class DependencyInjection
         services.AddSingleton<IDerivativeStorage, LocalDerivativeStorage>();
         services.AddSingleton<IImageRenderer, ProcessImageRenderer>();
         services.AddScoped<IImageWorkStore, PostgresImageWorkStore>();
-        services.AddScoped<IImageJobProcessor, ImageJobProcessor>();
+        services.AddScoped<IImageJobProcessor, GuardedImageJobProcessor>();
         services.AddScoped<IAssetDerivatives, PostgresAssetDerivatives>();
         services.AddScoped<IAssetLibrary, PostgresAssetLibrary>();
+        services.AddScoped<IAssetLifecycle, PostgresAssetLifecycle>();
+        services.AddScoped<IContentMaintenance, PostgresContentMaintenance>();
         services.AddScoped<IStorageStatusService, PostgresStorageStatusService>();
         services.AddSingleton<IStorageUsageReader, LocalStorageUsageReader>();
         services.AddSingleton<IStorageHousekeeping, LocalStorageHousekeeping>();

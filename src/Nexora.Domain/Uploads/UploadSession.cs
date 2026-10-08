@@ -52,6 +52,7 @@ public sealed class UploadSession
     public string? AssemblySha256 { get; private set; }
     public string? AssemblyMimeType { get; private set; }
     public Guid? ResultAssetId { get; private set; }
+    public DateTimeOffset? ResultPurgedAt { get; private set; }
     public string? FailureCode { get; private set; }
     public ICollection<UploadChunk> Chunks { get; private set; } = [];
     public BackgroundJob? Job { get; private set; }
@@ -136,6 +137,18 @@ public sealed class UploadSession
         FailureCode = code;
         State = UploadState.Failed;
         Touch(now);
+    }
+
+    public void MarkResultPurged(DateTimeOffset now)
+    {
+        RequireUtc(now);
+        if (State != UploadState.Completed || now < LastActivityAt)
+            throw new InvalidOperationException("Only a completed upload can lose its purged result.");
+        if (ResultPurgedAt is not null) return;
+        if (ResultAssetId is null) throw new InvalidOperationException("The completed result is missing.");
+        ResultAssetId = null;
+        ResultAsset = null;
+        ResultPurgedAt = now;
     }
 
     public void FinishCleanup()

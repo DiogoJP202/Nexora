@@ -9,7 +9,8 @@ public sealed record CreateUploadRequest(string OriginalName, long ExpectedLengt
 public sealed record UploadOperationSummary(Guid Id, BackgroundJobState State, int Attempts, string? FailureCode);
 public sealed record UploadSnapshot(Guid Id, string OriginalName, long ExpectedLength, int ChunkSize,
     int ChunkCount, UploadState State, int[] ConfirmedChunks, DateTimeOffset CreatedAt,
-    DateTimeOffset LastActivityAt, AssetSnapshot? Result, string? FailureCode, UploadOperationSummary? Operation);
+    DateTimeOffset LastActivityAt, AssetSnapshot? Result, string? FailureCode, UploadOperationSummary? Operation,
+    DateTimeOffset? ResultPurgedAt = null);
 public sealed record UploadChunkReceipt(int Number, long Size, string Sha256, bool Reused);
 
 public interface IUploadService
