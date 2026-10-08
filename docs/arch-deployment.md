@@ -261,6 +261,30 @@ sudo systemctl show nexora-api.service nexora-worker.service -p User -p MemoryCu
 
 Não ative logging de bodies/headers, SQL sensível, parâmetros Npgsql ou exception details. Os exemplos mantêm categorias Microsoft em Warning e os erros da aplicação são sanitizados. Health anônimo divulga somente status, sem connection string ou paths.
 
+Confira capacidade do volume e consumo por categoria sem listar nomes de conteúdo:
+
+```bash
+df -h /srv/nexora /var/lib/nexora
+sudo du -sh /srv/nexora/blobs /srv/nexora/thumbnails /srv/nexora/previews /srv/nexora/temp
+```
+
+O cliente autenticado pode consultar `/api/storage` para biblioteca ativa, lixeira, Blobs/derivados, temporários, reservas e espaço livre. Reserve a margem antes de novos uploads e investigue temporários/reservas persistentes pelo estado dos uploads/jobs; não exclua arquivos físicos à mão para liberar capacidade.
+
+Para diagnóstico da fila, abra `sudo -u postgres psql -X --dbname=nexora` no terminal administrativo e execute somente consultas:
+
+```sql
+SELECT "Kind", "State", count(*) FROM public."BackgroundJobs"
+GROUP BY "Kind", "State" ORDER BY "Kind", "State";
+SELECT "Id", "Kind", "Attempts", "MaximumAttempts", "FailureCode", "NextAttemptAt"
+FROM public."BackgroundJobs" WHERE "State" = 'Failed'
+ORDER BY "NextAttemptAt", "Id" LIMIT 100;
+SELECT "Id", "Kind", "LeaseExpiresAt"
+FROM public."BackgroundJobs" WHERE "State" = 'Running' AND "LeaseExpiresAt" <= now()
+ORDER BY "LeaseExpiresAt", "Id" LIMIT 100;
+```
+
+Uma tarefa esgotada permanece visível para investigação. Confira código de falha, espaço, Worker e journal antes de intervir; lease expirado permite recuperação pelo Worker. Não altere estado, lease ou tentativas por SQL como procedimento automático de retry. Não há alertas, painel nem endpoint de administração de jobs nesta entrega.
+
 ## 8. Aceitação no Arch ainda pendente
 
 Antes de registrar a Fase 7 como concluída, guarde evidências da release/commit, versões do host e resultados destes fluxos:

@@ -1,6 +1,6 @@
 # Nexora — validação operacional da Fase 7
 
-Atualizado em 8 de outubro de 2026. **A Fase 7 permanece em preparação.** Nenhum servidor Arch foi acessado, instalado ou restaurado durante este incremento. Os comandos deste documento são um roteiro a executar com dados de teste antes do uso pessoal em produção.
+Atualizado em 8 de outubro de 2026. Código de referência da preparação: `fb7d9b6`. **A Fase 7 permanece em preparação.** Nenhum servidor Arch foi acessado, instalado ou restaurado durante este incremento. Os comandos deste documento são um roteiro a executar com dados de teste antes do uso pessoal em produção.
 
 ## Evidências locais
 
@@ -8,9 +8,14 @@ Atualizado em 8 de outubro de 2026. **A Fase 7 permanece em preparação.** Nenh
 - Restore com arquivos de lock; build Release; 229 testes aprovados, sendo 60 unitários e 169 de integração, sem falhas ou ignorados.
 - Publicação cruzada para Linux x64: API, Worker e migration bundle são ELF x86-64. API e Worker incluem SkiaSharp nativo; os três artefatos incluem runtimes .NET/ASP.NET Core 10.0.12, verificados pela configuração publicada ou embutida.
 - Scripts Bash verificados sintaticamente com Git Bash. Guardas de caminhos e manifesto testadas em diretórios temporários; o resultado informa explicitamente verificações de links indisponíveis nesse ambiente.
+- Guardas: 18 verificações aprovadas e 3 de symlinks ignoradas por emulação do Git Bash. Fixtures GNU tar aceitaram o arquivo POSIX e recusaram traversal e duplicatas; não executaram serviços nem restore de banco.
+- Release limpa `phase7-linux-x64-20261008`, gerada por `Publish-ArchRelease.ps1` a partir de `fb7d9b6`, com `sourceDirty=false`. SHA-256 do manifesto: `a655352b7580021dc0c9ce1853dad43b6ca82d746579a6b12dc54d17aacb677f`. Configuração local sintética foi excluída durante a publicação.
+- Conferência independente por `common.sh`: cobertura completa do manifesto e hashes dos 723 arquivos aprovados.
 - Os pacotes ficam em `artifacts/arch/<release-id>`, ignorados pelo Git. Releases de produção exigem commit limpo, `sourceDirty=false` e hash do manifesto obtido na origem. A opção `-AllowDirty` produz somente pacotes de verificação, recusados pelo instalador.
 
 Publicação cruzada confere o formato e o conteúdo do pacote. A execução de código nativo, unidades systemd, permissões Linux e recuperação após reinício dependem das verificações abaixo.
+
+O SQL de provisionamento PostgreSQL foi revisado e seus comandos permanecem pendentes de execução no host. Os testes de integração usam bancos próprios de desenvolvimento; não reproduzem os privilégios Linux/roles do provisionamento de produção.
 
 ## Registro do servidor
 

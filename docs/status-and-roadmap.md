@@ -1,6 +1,6 @@
 # Nexora — estado atual e próximas etapas
 
-Atualizado em **8 de outubro de 2026**. Código de referência da Fase 6: `e27ca91`. As fases 1 a 6 foram verificadas localmente no Windows com PostgreSQL nativo; a operação no Arch continua pendente.
+Atualizado em **8 de outubro de 2026**. Código de referência da Fase 6: `e27ca91`; preparação da Fase 7: `fb7d9b6`. As fases 1 a 6 foram verificadas localmente no Windows com PostgreSQL nativo; a operação no Arch continua pendente.
 
 O Nexora já tem fundação, autenticação, armazenamento com deduplicação, arquivos/imagens por API e biblioteca com timeline, favoritos, renomeação, lixeira, restauração e coleta segura. A Fase 7 está em preparação: ferramentas Linux e procedimentos de operação disponíveis, com execução no Arch e restauração real pendentes. Clientes dependem das fases seguintes.
 
