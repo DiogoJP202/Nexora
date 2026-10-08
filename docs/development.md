@@ -1,6 +1,6 @@
 # Desenvolvimento local
 
-Execute os comandos deste guia na raiz do repositório. As fases 1 a 3 entregam fundação, autenticação e armazenamento interno com deduplicação; endpoints de arquivos ainda não existem.
+Execute os comandos deste guia na raiz do repositório. As fases 1 a 4 entregam fundação, autenticação, armazenamento com deduplicação e arquivos por API. API e Worker são processos separados que compartilham PostgreSQL e a raiz de storage.
 
 ## SDK e dependências
 
@@ -67,9 +67,9 @@ O banco `nexora_dev` pertence à aplicação local. `nexora_test` e a role corre
 | `DataProtection:CertificatePath` | Não necessário no Windows; desenvolvimento Linux permite key ring sem certificado. | Obrigatório em Linux fora de Development: PFX RSA protegido com chave privada. |
 | `DataProtection:CertificatePassword` | Segredo opcional para o PFX. | Fornecido fora do Git junto aos demais segredos. |
 
-A API utiliza os providers padrão do ASP.NET Core e acrescenta variáveis com prefixo `NEXORA_`. O provider adicional é carregado por último e pode sobrescrever os demais valores. Use dois underscores para hierarquia: `NEXORA_Storage__RootPath` e `NEXORA_ConnectionStrings__Nexora`. `NEXORA_STORAGE_PATH` não corresponde à configuração atual.
+A API e o Worker utilizam os providers nativos de configuração e acrescentam variáveis com prefixo `NEXORA_`. O provider adicional é carregado por último e pode sobrescrever os demais valores. Use dois underscores para hierarquia: `NEXORA_Storage__RootPath`, `NEXORA_ConnectionStrings__Nexora` e `NEXORA_Uploads__ChunkSizeBytes`. `NEXORA_STORAGE_PATH` não corresponde à configuração atual. Ambos validam opções de banco, storage e uploads na inicialização; mantenha os mesmos limites nos dois processos.
 
-User Secrets da API usam o identificador `Nexora.Api.Development`. Para registrar a connection string, substitua a senha do exemplo localmente:
+User Secrets da API e do Worker usam o identificador `Nexora.Api.Development`, carregado em Development. Para registrar a connection string, substitua a senha do exemplo localmente:
 
 ```powershell
 dotnet user-secrets set "ConnectionStrings:Nexora" "Host=127.0.0.1;Port=55432;Database=nexora_dev;Username=nexora_dev;Password=<senha-local>" --project src/Nexora.Api
@@ -97,7 +97,7 @@ Um servidor PostgreSQL temporariamente indisponível deixa readiness em falha; c
 
 ## Migrations explícitas
 
-A migration inicial configura Identity; a Fase 2 acrescenta dispositivos, sessões e refresh tokens; `20261006114248_ContentBlobsAssets`, da Fase 3, acrescenta Blobs e Assets. Aplicar migrations não cria administrador. Toda alteração de schema passa por migration versionada e revisão.
+A migration inicial configura Identity; a Fase 2 acrescenta dispositivos, sessões e refresh tokens; `20261006114248_ContentBlobsAssets`, da Fase 3, acrescenta Blobs e Assets. `20261008112515_UploadsDurableJobs` acrescenta sessões/chunks de upload, jobs e suas tentativas rastreadas. Aplicar migrations não cria administrador. Toda alteração de schema passa por migration versionada e revisão.
 
 Com a configuração da API de desenvolvimento disponível:
 
@@ -113,7 +113,7 @@ Para gerar uma migration de uma alteração futura de modelo:
 dotnet ef migrations add NomeDaAlteracao --project src/Nexora.Infrastructure --startup-project src/Nexora.Api
 ```
 
-Revise o SQL e o impacto de cada migration antes de aplicá-la. API e health checks nunca executam `Migrate` na inicialização. Em produção, migrations serão uma operação explícita do deploy com credencial apropriada, antes de disponibilizar a nova versão; não embutir uma senha de produção no comando ou no repositório.
+Revise o SQL e o impacto de cada migration antes de aplicá-la. API, Worker e health checks nunca executam `Migrate` na inicialização. Em produção, migrations serão uma operação explícita do deploy com credencial apropriada, antes de disponibilizar a nova versão; não embutir uma senha de produção no comando ou no repositório.
 
 ## Criar ou recuperar a conta administrativa
 
@@ -149,9 +149,22 @@ Invoke-RestMethod http://127.0.0.1:5100/openapi/v1.json
 
 Live não depende de PostgreSQL. Ready verifica conexão e migrations pendentes com timeout de cinco segundos, retornando status genérico e `503` em falha. OpenAPI existe somente em Development; não há Swagger UI instalada. Respostas de erro utilizam Problem Details com código e identificador de rastreamento, sem detalhes internos.
 
-O limite atual de corpo é 16 KiB, suficiente para autenticação. Não usar essa API para enviar arquivos; limites por rota de upload pertencem à Fase 4. Requisições de login e refresh não devem incluir um bearer antigo de sessão revogada; enviar somente seus corpos JSON.
+As rotas JSON mantêm o limite de 16 KiB. A rota `PUT /api/uploads/{id}/chunks/{number}` usa o tamanho configurado de chunk como limite e recebe apenas `application/octet-stream`; também verifica o tamanho real exigido para aquele índice. Requisições de login e refresh não devem incluir um bearer antigo de sessão revogada; enviar somente seus corpos JSON.
 
 O HTTP em loopback serve ao desenvolvimento local. Fora de Development, `/api/*` exige HTTPS. O uso previsto é Tailscale Serve terminando TLS e encaminhando para loopback; Forwarded Headers só são aceitos de proxies loopback confiáveis. Funnel permanece desativado e grants restringem a tailnet. Deploy systemd e operação com dados pessoais ainda pertencem à Fase 7.
+
+## Executar o Worker
+
+Com as migrations aplicadas e a API em execução, abra outro terminal na raiz do repositório:
+
+```powershell
+$env:DOTNET_ENVIRONMENT = 'Development'
+dotnet run --project src/Nexora.Worker
+```
+
+O launch profile também define Development. O Worker carrega `appsettings.json` a partir da pasta do executável, lê os mesmos User Secrets da API em Development e aceita overrides `NEXORA_`. Ele não escuta HTTP e não requer o diretório de chaves de autenticação da API. Configure a mesma conexão, raiz e opções de uploads nos dois processos. Variáveis de ambiente são locais a cada terminal: um override na janela da API não se propaga ao Worker.
+
+O processo executa uma montagem por vez, renova leases e mantém expiração/limpeza em paralelo. Sem Worker, uma conclusão permanece `Finalizing`. Para interromper localmente, use Ctrl+C; um job cujo lease ficou ativo pode ser recuperado quando ele expirar. O contrato e os estados consultáveis estão em [uploads.md](uploads.md).
 
 ## Testes unitários e de integração
 
@@ -176,8 +189,8 @@ Testes de autenticação usam Data Protection efêmero por padrão para não toc
 
 Cada fixture cria um banco `nexora_it_<guid>` e aplica migrations nesse banco. A limpeza é restrita ao identificador criado pela própria fixture e a seu prefixo; nunca apontar testes à produção. Bancos que sobrarem após uma interrupção devem ser examinados pelo administrador e removidos somente quando for confirmado que pertencem à execução interrompida, sem comandos de exclusão por wildcard.
 
-Testes de conteúdo usam diretórios próprios sob a pasta temporária do sistema, com limpeza restrita ao caminho gerado pela fixture. Verificam streams sem seek, publicação sem sobrescrita, limites reais de bytes, cancelamento, junctions, deduplicação concorrente e recuperação de Staging por reenvio. Não usam o storage pessoal configurado na API.
+Testes de conteúdo e uploads usam diretórios próprios sob a pasta temporária do sistema, com limpeza restrita ao caminho gerado pela fixture. Verificam streams sem seek, publicação sem sobrescrita, limites reais de bytes, cancelamento, junctions, deduplicação concorrente, chunks, leases, retomada, limpeza, capacidade e downloads. Não usam o storage pessoal configurado na API.
 
-O [guia de armazenamento](storage.md) descreve os contratos internos e os limites desta entrega. Reservas, quotas e reconciliação automática ficam para a Fase 4. Os caminhos nativos de publicação e sincronização Linux precisam de validação no Arch; os resultados locais desta fase são de Windows.
+O [guia de armazenamento](storage.md) descreve os contratos internos; [uploads.md](uploads.md) descreve os limites de admissão, reservas e recuperação durável da Fase 4. Não há quota fixa de 500 GB: capacidade e espaço livre vêm do volume. Os caminhos nativos de publicação, sincronização e locks Linux precisam de validação no Arch; os resultados locais desta fase são de Windows. Testes de falha injetada e recuperação de lease não comprovam persistência após queda de energia.
 
 Esses comandos descrevem a validação disponível; a documentação não representa um relatório de testes de uma execução específica.

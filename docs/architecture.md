@@ -2,7 +2,7 @@
 
 Nexora é uma nuvem privada para fotos, vídeos e arquivos pessoais, executada em um único servidor Arch Linux com aproximadamente 500 GB disponíveis. O MVP terá uma conta administrativa, acesso privado por Tailscale e uma API ASP.NET Core. O cliente mobile será uma etapa posterior.
 
-Este documento registra o desenho aprovado. As fases 1 a 3 entregam fundação, autenticação, modelos de conteúdo e armazenamento interno com deduplicação. Uploads, downloads e mídia por HTTP continuam previstos para as fases seguintes.
+Este documento registra o desenho aprovado e sua implementação incremental. As fases 1 a 4 entregam fundação, autenticação, modelos de conteúdo, uploads retomáveis, downloads e Worker durável. Imagens, biblioteca completa e operação em produção continuam nas fases seguintes.
 
 Consulte [estado e próximas etapas](status-and-roadmap.md) para o inventário das entregas atuais, as pendências de cada fase e seus critérios de aceite.
 
@@ -19,7 +19,7 @@ Consulte [estado e próximas etapas](status-and-roadmap.md) para o inventário d
 
 ## Separação de responsabilidades
 
-A árvore abaixo é a estrutura alvo. Os quatro projetos centrais e os dois projetos de testes já existem; Worker entra na Fase 4 e o cliente mobile na Fase 8.
+A árvore abaixo é a estrutura alvo. Os quatro projetos centrais, Worker e os dois projetos de testes já existem; o cliente mobile entra na Fase 8.
 
 ```text
 Nexora.sln
@@ -36,7 +36,7 @@ apps/
   Nexora.Mobile
 ```
 
-`Domain` contém entidades e invariantes sem dependência de ASP.NET Core, EF Core ou filesystem. `Application` coordena casos de uso e define os contratos necessários. `Infrastructure` implementa persistência, storage e integrações. `Api` concentra HTTP, autenticação, validação de entrada e composição de dependências. `Worker` será o host de processamento e manutenção em background.
+`Domain` contém entidades e invariantes sem dependência de ASP.NET Core, EF Core ou filesystem. `Application` coordena casos de uso e define os contratos necessários. `Infrastructure` implementa persistência, storage e integrações. `Api` concentra HTTP, autenticação, validação de entrada e composição de dependências. `Worker` executa processamento e manutenção em background, compartilhando os mesmos casos de uso e infraestrutura.
 
 Não introduzir repositório genérico, mediator, event bus ou camadas adicionais sem uma necessidade concreta. Manter dependências direcionadas para Domain/Application e reutilizar recursos nativos do framework.
 
@@ -53,12 +53,13 @@ Não introduzir repositório genérico, mediator, event bus ou camadas adicionai
 | UploadSession | Sessão retomável, tamanho esperado, chunks, estado, atividade e resultado. |
 | UploadChunk | Índice, tamanho, SHA-256 e localização interna de um chunk confirmado. |
 | BackgroundJob | Trabalho durável, tentativas, próxima execução e lease do worker. |
+| BackgroundJobAttempt | UUID de uma tentativa persistido antes de criar arquivos de montagem/publicação. |
 
-Identity, Device, AuthSession e RefreshToken estão implementados na Fase 2. Blob e Asset estão implementados na Fase 3. UploadSession, UploadChunk e BackgroundJob entrarão na Fase 4.
+Identity, Device, AuthSession e RefreshToken estão implementados na Fase 2. Blob e Asset foram introduzidos na Fase 3. UploadSession, UploadChunk, BackgroundJob e BackgroundJobAttempt estão implementados na Fase 4.
 
 Blob e Asset separados permitem deduplicar bytes sem acoplar nome, favorito ou exclusão à cópia física. SHA-256 é calculado pelo servidor e tem unicidade no Blob. Um Asset por `(OwnerId, BlobId)` evita duplicatas lógicas mesmo em conclusões concorrentes.
 
-A importação interna de conteúdo idêntico retorna o Asset ativo existente, sem alterar seus metadados. Se estiver na lixeira, retorna `AssetInTrash`, exigindo restauração explícita. Na Fase 4, concluir novamente a mesma UploadSession retornará seu resultado anterior.
+A importação de conteúdo idêntico retorna o Asset ativo existente, sem alterar seus metadados. Se estiver na lixeira, retorna `AssetInTrash`, exigindo restauração explícita; uploads HTTP registram essa decisão como falha terminal `asset_in_trash`. Concluir novamente a mesma UploadSession retorna a mesma operação ou seu resultado anterior.
 
 Não manter `ReferenceCount` persistido inicialmente: consultar referências incluindo a lixeira evita divergência de contadores. A Fase 5 acrescenta dimensões, orientação e data extraída da imagem. Câmera e geolocalização ficam para um incremento posterior à Fase 5. Preservar datas EXIF sem fuso como dados locais de origem, sem adivinhar que representam UTC; timestamps operacionais da aplicação são UTC.
 
@@ -74,13 +75,13 @@ As chaves de ASP.NET Core Data Protection persistem fora da instalação e do st
 
 Passphrases têm de 14 a 256 caracteres, sem regras artificiais de composição; email também é username. Identity bloqueia a conta por 15 minutos após cinco falhas. Login tem limite de cinco chamadas por IP/minuto e refresh de 30 por IP/minuto. Os [contratos e fluxos implementados](authentication.md) detalham login, refresh e revogação.
 
-Os futuros endpoints de Assets, uploads, lixeira e conteúdo sempre verificarão o proprietário. UUID, StorageKey ou SHA-256 não concederão acesso. Consultas de existência por hash só poderão retornar resultados autorizados para a conta solicitante.
+Os endpoints de Assets, uploads e conteúdo verificam o proprietário; lixeira seguirá a mesma regra na Fase 6. UUID, StorageKey ou SHA-256 não concedem acesso. Consultas internas por hash resolvem deduplicação sem expor conteúdo de outra conta.
 
-Downloads autenticados usarão streaming e nomes de resposta sanitizados. MIME e extensão informados pelo cliente não são prova de conteúdo; arquivos arbitrários não devem ser executados nem renderizados como HTML no domínio da API.
+Downloads autenticados usam streaming, nomes de resposta tratados pelo framework, `application/octet-stream`, attachment e `nosniff`. MIME e extensão informados pelo cliente não são prova de conteúdo; arquivos arbitrários não devem ser executados nem renderizados como HTML no domínio da API.
 
 ## Contratos HTTP atuais e previstos
 
-Os endpoints da Fase 2 estão disponíveis; os das fases posteriores continuam previstos. Recursos de usuário sempre exigem autenticação e autorização; login/refresh têm validação e limitação próprias.
+Os endpoints das fases 2 e 4 estão disponíveis; os das fases 5/6 continuam previstos. Recursos de usuário sempre exigem autenticação e autorização; login/refresh têm validação e limitação próprias.
 
 | Fase | Contrato | Responsabilidade |
 | --- | --- | --- |
@@ -88,31 +89,31 @@ Os endpoints da Fase 2 estão disponíveis; os das fases posteriores continuam p
 | 2 | `GET /api/devices`, `DELETE /api/devices/{id}` | Listar dispositivos e revogar o selecionado. |
 | 4 | `POST /api/uploads`, `GET /api/uploads/{id}`, `DELETE /api/uploads/{id}` | Criar, consultar e cancelar uma sessão de upload. |
 | 4 | `PUT /api/uploads/{id}/chunks/{number}`, `POST /api/uploads/{id}/complete` | Receber chunk idempotente e solicitar conclusão em background. |
-| 4 | `GET /api/assets`, `GET /api/assets/{id}`, `GET /api/assets/{id}/content` | Listagem básica, metadados e download com HTTP Range. |
+| 4 | `GET /api/assets`, `GET /api/assets/{id}`, `GET`/`HEAD /api/assets/{id}/content` | Listagem básica, metadados e download com HTTP Range/ETag. |
 | 4 | `GET /api/storage` | Espaço físico, tamanho lógico e reservas. |
 | 5 | `GET /api/assets/{id}/thumbnail`, `GET /api/assets/{id}/preview` | Servir derivados autorizados, sem carregar o original. |
 | 6 | `PATCH /api/assets/{id}` | Alterar favoritos e os metadados editáveis previstos. |
 | 6 | `DELETE /api/assets/{id}`, `GET /api/trash`, `POST /api/trash/{id}/restore` | Soft delete, listagem da lixeira e restauração explícita. |
 
-Usar Problem Details para erros e DTOs sem caminhos físicos ou entidades EF expostas. A conclusão do upload retorna `202` durante processamento; consultar a sessão informa o resultado ou a falha. Downloads completos/parciais trabalham com Streams e respeitam Range válido, inclusive `206` e `416` quando aplicável.
+Usar Problem Details para erros e DTOs sem caminhos físicos ou entidades EF expostas. A conclusão do upload retorna `202` durante processamento e `200` ao repetir uma conclusão terminal; consultar a sessão informa o resultado ou a falha. Downloads completos/parciais trabalham com Streams e respeitam Range válido, inclusive `206` e `416` quando aplicável. Os [contratos da Fase 4](uploads.md) descrevem índices, estados, erros, paginação e capacidade.
 
 ## Upload e publicação
 
-A interface HTTP prevista cria a sessão, recebe chunks numerados, informa o progresso e solicita a conclusão. Upload simples, quando introduzido, deve usar as mesmas invariantes de publicação e deduplicação.
+A interface HTTP cria a sessão, recebe chunks numerados a partir de zero, informa o progresso e solicita a conclusão. Upload simples, quando introduzido, deverá usar as mesmas invariantes de publicação e deduplicação.
 
 1. Criar a UploadSession autenticada, validar tamanho e reservar capacidade. O servidor determina o tamanho dos chunks e a quantidade esperada.
-2. Receber cada chunk em streaming limitado, escrevendo uma tentativa temporária independente. Validar índice, quantidade de bytes e hash antes de confirmar o chunk no banco.
+2. Receber cada chunk binário em streaming limitado, escrevendo uma tentativa temporária independente. Validar índice, quantidade de bytes e hash antes de confirmar o chunk no banco; `X-Chunk-SHA256` é uma expectativa opcional do cliente.
 3. Um reenvio com mesmo índice e conteúdo é idempotente. Conteúdo diferente para um índice confirmado é conflito. O progresso enumera somente chunks confirmados.
 4. A conclusão verifica todos os chunks e muda a sessão de `Open` para `Finalizing`, gravando um job na mesma transação. Retornar `202 Accepted`, sem montar um arquivo grande dentro da requisição HTTP.
-5. O worker monta o arquivo em streaming, valida tamanho e hash final e resolve a deduplicação. Um Blob `Ready` pode ser reutilizado após verificar seu conteúdo; `Staging` permite retomar publicação da mesma geração; `Deleting` impede criação de referência até terminar a coleta.
-6. Para conteúdo novo, persistir a intenção `Staging` e sua chave física antes de publicar o arquivo. Só depois da publicação, marcar Blob `Ready`, criar ou resolver o Asset, concluir a sessão e agendar processamento de mídia na mesma transação.
-7. Remover chunks e arquivos temporários após a confirmação. A limpeza é idempotente e pode ser repetida após reinício.
+5. O Worker limpa tentativas anteriores, monta o arquivo em streaming e valida tamanho/hash final. O UUID da tentativa já está persistido antes da escrita. Registrar a montagem antes de remover os chunks torna essas remoções recuperáveis e limita as cópias completas a duas no fluxo planejado.
+6. Resolver a deduplicação: um Blob `Ready` só é reutilizado após verificar seu conteúdo; `Staging` permite retomar publicação da mesma geração; `Deleting` impede nova referência. Para conteúdo novo, persistir intenção e chave antes de publicar. Só depois da publicação, confirmar Blob, Asset, upload e job em uma transação, exigindo lease válido. O job de mídia será acrescentado na Fase 5.
+7. Remover montagem e tentativas terminais antes de liberar a reserva. A limpeza é idempotente e pode ser repetida após uma interrupção; os registros de referências permanecem enquanto uma exclusão/sincronização estiver pendente.
 
-Estados de UploadSession: `Open`, `Finalizing`, `Completed`, `Cancelled`, `Expired` e `Failed`. Estados de Blob: `Staging`, `Ready` e `Deleting`. Transições são verificadas no banco; não depender somente de locks em memória, porque API e Worker poderão ser processos separados.
+Estados de UploadSession: `Open`, `Finalizing`, `Completed`, `Cancelled`, `Expired` e `Failed`. Estados de Blob: `Staging`, `Ready` e `Deleting`. Transições são verificadas no banco; API e Worker executam como processos separados e coordenam as operações por locks no PostgreSQL.
 
 Reservas globais limitam o espaço que uploads em curso podem consumir. A montagem precisa considerar simultaneamente os chunks e o arquivo final, chegando a aproximadamente duas vezes o tamanho declarado. Um limite de sessões concorrentes não garante que todas possam receber arquivos do tamanho máximo ao mesmo tempo: o orçamento global decide a admissão.
 
-Defaults previstos, configuráveis quando esses fluxos forem implementados:
+Defaults atuais de upload e parâmetros das fases seguintes:
 
 | Limite | Valor inicial |
 | --- | --- |
@@ -122,10 +123,10 @@ Defaults previstos, configuráveis quando esses fluxos forem implementados:
 | Margem mínima de espaço livre | 50 GiB. |
 | Sessões simultâneas por usuário | 2, condicionadas à capacidade global. |
 | Expiração de upload inativo | 7 dias sem atividade. |
-| Retenção na lixeira | 30 dias. |
-| Concorrência de processamento | Uma montagem e uma imagem por vez. |
+| Retenção na lixeira | 30 dias, prevista para a Fase 6. |
+| Concorrência de processamento | Uma montagem por Worker; imagem prevista na Fase 5. |
 
-Reservar aproximadamente `2 × tamanho declarado` na criação da sessão, serializando a admissão no banco e conferindo espaço real. O orçamento de 50 GiB admite somente um upload de 20 GiB durante montagem, mesmo que o teto de sessões seja dois. Não permitir que o corpo exceda o tamanho declarado; considerar derivados e demais usos do volume na avaliação de espaço.
+Reservar `2 × tamanho declarado` na criação da sessão, serializando a admissão no banco e conferindo espaço real. A contagem conservadora exige reservas + temporários físicos + nova reserva dentro do orçamento, além de espaço livre para margem + todas as reservas. O orçamento de 50 GiB admite somente um upload de 20 GiB, mesmo que o teto de sessões seja dois. O corpo não pode exceder o tamanho esperado; outros usos do volume afetam o espaço livre. A referência de 500 GB não constitui quota fixa.
 
 ## Storage e recuperação
 
@@ -133,23 +134,23 @@ Reservar aproximadamente `2 × tamanho declarado` na criação da sessão, seria
 
 Chaves internas são opacas e imutáveis, com identificador distinto por geração, por exemplo `blobs/ab/cd/<blob-id>`. SHA-256 identifica conteúdo no banco; uma chave física por geração impede uma limpeza antiga de remover um novo upload do mesmo hash.
 
-`IBlobStorage` recebe/devolve Streams e oferece publicação imutável, leitura, consulta de tamanho e exclusão idempotente. `ITemporaryStorage` separa temporários, limite real de bytes e hashing; suporte HTTP Range entra na Fase 4. Rename fica interno ao adaptador local, sem virar requisito da interface; um futuro storage S3 poderá implementar publicação por PUT/multipart sem reescrever os casos de uso.
+`IBlobStorage` recebe/devolve Streams e oferece publicação imutável, leitura, consulta de tamanho e exclusão idempotente. `ITemporaryStorage` separa temporários, limite real de bytes e hashing; contratos específicos acrescentam tentativas rastreadas para o Worker. HTTP Range é tratado na borda de download. Rename fica interno ao adaptador local, sem virar requisito da interface; um futuro storage S3 poderá implementar publicação por PUT/multipart sem reescrever os casos de uso.
 
 PostgreSQL e filesystem não compartilham uma transação. A Fase 3 persiste a intenção `Staging` antes de publicar sem sobrescrita, depois confirma `Ready` e resolve o Asset em outra transação. Advisory locks por hash e locks de linha coordenam conclusões concorrentes. Um reenvio pode verificar/publicar a mesma geração e concluir uma operação interrompida. Blob Ready ausente ou corrompido gera falha de integridade.
 
 Os adaptadores locais mantêm `temp` e `blobs` no mesmo filesystem, fazem flush do arquivo e publicam sem sobrescrita. No Linux, usam `renameat2(RENAME_NOREPLACE)` e sincronizam diretórios com `fsync`, recusando movimento entre mounts. Caminhos não canônicos, symlinks e junctions são rejeitados; diretórios e arquivos recebem permissões restritas. Essa responsabilidade fica no adaptador, sem contaminar a interface de storage.
 
-Reconciliação automática após reinício entra na Fase 4: examinar sessões em finalização, Blobs Staging e temporários, concluir após verificar conteúdo ou registrar falha explícita. A Fase 3 testa falha injetada e recuperação por reenvio no Windows; execução nativa e persistência após reinício no Arch continuam pendentes. O [guia de armazenamento](storage.md) detalha contratos, publicação e limites de recuperação.
+A Fase 4 recupera jobs com lease expirado, verifica montagens persistidas e retoma publicação da mesma geração, ou registra falha explícita. Manutenção limpa temporários terminais antes de liberar reservas e coleta somente temporários internos antigos, sem referência e sem escritor ativo. Não há coleta de Blobs ou varredura de reparação de todos os originais. Execução nativa Linux e persistência após reinício/queda de energia no Arch continuam pendentes na operação. Os guias de [armazenamento](storage.md) e [uploads](uploads.md) detalham os limites de recuperação.
 
 Reconciliação recupera operações interrompidas; não recria bytes perdidos por falha física. Backup e teste de restauração continuam necessários para proteger o conteúdo diante de falhas de hardware e perda de dados.
 
 ## Processamento e exclusão
 
-Na Fase 4, BackgroundJob será a fonte durável de trabalho. A alteração de negócio e o job serão gravados na mesma transação. O worker reclamará jobs com `FOR UPDATE SKIP LOCKED`, utilizará lease renovável e só confirmará resultados com seu token de lease válido. Reexecução deve ser idempotente, com tentativas limitadas e falhas visíveis. Channel poderá ser usado para sinalização, sem substituir a persistência.
+BackgroundJob é a fonte durável de trabalho. Finalizing e job são gravados na mesma transação. O Worker reclama jobs com `FOR UPDATE SKIP LOCKED`, utiliza lease renovável e só confirma resultados com token válido. Cada tentativa tem identidade persistida antes da escrita; retry remove tentativas anteriores sem atingir escritores ativos. O padrão é cinco tentativas, com falhas terminais consultáveis. Channel poderá ser usado futuramente para sinalização, sem substituir a persistência.
 
 Na Fase 5, usar SkiaSharp para imagens e MetadataExtractor para metadados de JPEG, PNG e WebP. Aplicar orientação e gerar thumbnail com lado máximo de 256 px e preview com lado máximo de 1280 px, preservando proporção e sem ampliar imagens menores. Datas EXIF sem fuso permanecem preservadas, sem conversão UTC inventada; câmera/geolocalização não entram nesta fase.
 
-A falha do processamento não removerá nem invalidará um original publicado. A API informará o estado da mídia e não carregará o original para servir cards. Processamento avançado de vídeos e FFmpeg ficam para depois; a Fase 4 introduzirá HTTP Range para conteúdo, sem antecipar transcodificação.
+A falha do processamento não removerá nem invalidará um original publicado. A API informará o estado da mídia e não carregará o original para servir cards. Processamento avançado de vídeos e FFmpeg ficam para depois; HTTP Range para originais já está disponível, sem transcodificação.
 
 Na Fase 6, soft delete alterará `Asset.DeletedAt` e manterá o Blob. Lixeira conservará bytes e referências. Restauração e purge disputarão o mesmo lock do Asset; uma exclusão definitiva concluída não poderá ser restaurada pela API.
 
@@ -174,7 +175,9 @@ Na autenticação, verificar expiração de access/session, rotação concorrent
 
 A Fase 3 verifica regras de Blob/Asset, chaves canônicas, hashing e cancelamento, streams sem seek, publicação imutável, limites de bytes, traversal/junctions, deduplicação entre proprietários e concorrente, conflito na lixeira, corrupção e retomada de Staging por reenvio. Testes de filesystem e banco usam fixtures isoladas.
 
-Priorizar autorização entre proprietários, traversal, limites de upload, chunks repetidos/conflitantes/fora de ordem, retomada, hash, deduplicação concorrente, conclusão repetida, expiração durante upload e disco cheio. Introduzir fault injection nas fronteiras filesystem/banco, recuperação de Staging, lease expirado, GC contra upload e purge contra restauração. Testar falha de thumbnails com original ainda acessível.
+A Fase 4 acrescenta testes de autorização, limites, chunks repetidos/conflitantes/fora de ordem, hash, deduplicação, conclusão repetida, leases, expiração, falhas nas fronteiras filesystem/banco, limpeza/capacidade e HTTP Range. Testes usam bancos e storage isolados. Os resultados da validação estão no [roadmap](status-and-roadmap.md).
+
+Nas fases seguintes, verificar processamento de imagens maliciosas e preservação do original; GC contra upload e purge contra restauração; e reinícios reais, caminhos nativos Linux e restauração no ambiente de operação.
 
 Na Fase 1, verificar configuração, health checks, acesso PostgreSQL e migrations em bancos de integração isolados. Não simular funcionalidades que ainda não existem apenas para gerar cobertura.
 
@@ -192,7 +195,7 @@ Na Fase 1, verificar configuração, health checks, acesso PostgreSQL e migratio
 | 7 — Operação | Deploy systemd/Arch, HTTPS/Tailscale, revisão de segurança, observabilidade e procedimentos de backup/restauração. |
 | 8 — Mobile | Contrato de sincronização, registro de mudanças e cliente MAUI Android; iOS posteriormente, respeitando as restrições de background de cada plataforma. |
 
-Segurança acompanha cada funcionalidade desde sua criação; a Fase 7 verifica e fecha a operação de produção. A etapa atual termina na Fase 3. O próximo incremento disponibiliza uploads retomáveis, Worker durável, biblioteca básica, downloads e capacidade por API.
+Segurança acompanha cada funcionalidade desde sua criação; a Fase 7 verifica e fecha a operação de produção. A etapa atual termina na Fase 4. O próximo incremento acrescenta metadados, orientação, thumbnails e previews de imagens.
 
 ## Referências técnicas
 

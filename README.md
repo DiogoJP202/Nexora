@@ -2,11 +2,11 @@
 
 Nuvem privada para fotos, vídeos e arquivos pessoais, construída com .NET 10, ASP.NET Core, EF Core e PostgreSQL 18. O destino de produção é um servidor Arch Linux, com systemd e acesso privado por Tailscale.
 
-## Estado atual: Fase 3
+## Estado atual: Fase 4
 
-A API inclui autenticação com Identity, access tokens opacos, refresh com rotação, sessões e revogação de dispositivos, além da fundação de configuração, PostgreSQL, migrations e health checks. A Fase 3 acrescenta Blob/Asset, armazenamento local imutável e importação interna em streaming com SHA-256 e deduplicação. A conta administrativa é criada somente por comando local. Upload e download HTTP entram na Fase 4; processamento de mídia entra na Fase 5.
+A API inclui autenticação com Identity, access tokens opacos, refresh com rotação, sessões e revogação de dispositivos, além da fundação de configuração, PostgreSQL, migrations e health checks. Os arquivos podem ser enviados em chunks retomáveis, finalizados pelo Worker, listados e baixados com HTTP Range. Blob/Asset mantêm armazenamento imutável, SHA-256 e deduplicação. A conta administrativa é criada somente por comando local. Processamento de mídia entra na Fase 5.
 
-Os projetos atuais são `Nexora.Api`, `Nexora.Application`, `Nexora.Domain`, `Nexora.Infrastructure`, `Nexora.UnitTests` e `Nexora.IntegrationTests`. Worker entra na Fase 4 e o cliente MAUI na Fase 8.
+Os projetos atuais são `Nexora.Api`, `Nexora.Application`, `Nexora.Domain`, `Nexora.Infrastructure`, `Nexora.Worker`, `Nexora.UnitTests` e `Nexora.IntegrationTests`. O cliente MAUI entra na Fase 8.
 
 ## Desenvolvimento
 
@@ -30,6 +30,15 @@ dotnet run --project src/Nexora.Api -- bootstrap-admin
 dotnet run --project src/Nexora.Api
 ```
 
+Execute o Worker em outro terminal, com a mesma conexão PostgreSQL e raiz de storage da API:
+
+```powershell
+$env:DOTNET_ENVIRONMENT = 'Development'
+dotnet run --project src/Nexora.Worker
+```
+
+Em Development, o Worker compartilha o identificador de User Secrets da API. Sem o Worker, chunks podem ser recebidos, mas conclusões ficam pendentes. Consulte [uploads e Worker](docs/uploads.md) para o fluxo completo e as políticas de capacidade.
+
 O bootstrap solicita email e senha interativamente, sem exibir a senha. Execute-o uma vez após aplicar migrations; a API não cria administrador automaticamente nem oferece registro público. Consulte [autenticação](docs/authentication.md) para login, dispositivos e recuperação local da conta.
 
 A API de desenvolvimento escuta em `http://127.0.0.1:5100`:
@@ -41,6 +50,9 @@ A API de desenvolvimento escuta em `http://127.0.0.1:5100`:
 | `/openapi/v1.json` | Documento OpenAPI disponível somente em Development. |
 | `/api/auth/login`, `/api/auth/refresh`, `/api/auth/logout` | Login, rotação de refresh e encerramento da sessão. |
 | `/api/devices` | Listagem autenticada; `DELETE /api/devices/{id}` revoga o dispositivo. |
+| `/api/uploads` | Criação autenticada de sessão; consulta, chunks, conclusão e cancelamento por ID. |
+| `/api/assets` | Biblioteca paginada; detalhes e download em `/api/assets/{id}/content`. |
+| `/api/storage` | Tamanhos lógicos, consumo físico, temporários, reservas e espaço do volume. |
 
 Health checks retornam apenas um status sanitizado. A aplicação não aplica migrations automaticamente.
 
@@ -59,5 +71,6 @@ Testes unitários, HTTP/configuração e filesystem executam sem PostgreSQL. Tes
 - [Desenvolvimento](docs/development.md): configuração, PostgreSQL, migrations e validação local.
 - [Autenticação](docs/authentication.md): conta única, contratos HTTP, tokens, revogação e chaves de proteção.
 - [Armazenamento](docs/storage.md): identidade de conteúdo, contratos internos, publicação, deduplicação e recuperação por reenvio.
+- [Uploads e Worker](docs/uploads.md): contratos HTTP, retomada, finalização durável, download e capacidade.
 
 Segredos, binários PostgreSQL, dados de banco e arquivos pessoais ficam fora do repositório. Nexora é armazenamento; backups do banco e do conteúdo continuam necessários.

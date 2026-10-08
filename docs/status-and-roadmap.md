@@ -1,8 +1,8 @@
 # Nexora — estado atual e próximas etapas
 
-Atualizado em **6 de outubro de 2026**. Estado do código conferido no commit `435e051`.
+Atualizado em **8 de outubro de 2026**. Código de referência da Fase 4: `7873ec8`. Aceite verificado localmente no Windows com PostgreSQL nativo.
 
-O Nexora já tem fundação, autenticação e armazenamento interno com deduplicação implementados. A próxima entrega é a Fase 4, que disponibiliza upload retomável, Worker e arquivos por API. Biblioteca completa, imagens e clientes dependem das fases seguintes.
+O Nexora já tem fundação, autenticação, armazenamento com deduplicação e arquivos por API: upload retomável, Worker, biblioteca básica e download. A próxima entrega é a Fase 5, com metadados, thumbnails e previews de imagens. Biblioteca completa, produção no Arch e clientes dependem das fases seguintes.
 
 ## 1. O que o projeto pretende ser
 
@@ -14,13 +14,13 @@ O desenvolvimento começa pela API. O cliente mobile virá depois, inicialmente 
 
 ### Decisões já tomadas
 
-- Monólito modular em .NET 10: API, Application, Domain e Infrastructure; Worker separado quando houver processamento demorado.
+- Monólito modular em .NET 10: API, Application, Domain e Infrastructure; Worker separado para processamento e manutenção.
 - Uma conta administrativa, sem cadastro público; biblioteca plana no MVP.
 - PostgreSQL para metadados e estados; filesystem para originais, derivados e temporários.
 - Blob representa os bytes imutáveis; Asset representa o item da biblioteca e suas permissões, nome e lixeira.
-- A importação interna de conteúdo idêntico reutiliza o Asset existente, preservando seus metadados. Um item na lixeira exige restauração explícita; os endpoints correspondentes serão introduzidos nas próximas fases.
+- Conteúdo idêntico reutiliza o Asset existente, preservando seus metadados. Um item na lixeira exige restauração explícita; os endpoints de lixeira serão introduzidos na Fase 6.
 - O servidor será confiável e poderá ler os originais para processamento.
-- Thumbnails e previews começarão por JPEG, PNG e WebP. Outros formatos permanecerão acessíveis como originais quando o upload estiver implementado.
+- Thumbnails e previews começarão por JPEG, PNG e WebP. Outros formatos já podem ser enviados e baixados como arquivos originais.
 - Segurança, testes e recuperação acompanharão cada fase; operação em produção será validada na Fase 7.
 
 Os detalhes técnicos e as razões dessas decisões estão em [architecture.md](architecture.md).
@@ -33,8 +33,8 @@ Os detalhes técnicos e as razões dessas decisões estão em [architecture.md](
 | 1 — Fundação | Concluída | Solution, configuração, PostgreSQL, migrations Identity e health checks. |
 | 2 — Identidade | Concluída | Administração local da conta, login, sessões, refresh e dispositivos. |
 | 3 — Armazenamento | Concluída | Blob/Asset, adaptador local, streaming, SHA-256 e deduplicação interna. |
-| 4 — Arquivos utilizáveis | Próxima; não iniciada | Upload retomável, Worker durável, biblioteca básica, download e capacidade. |
-| 5 — Imagens | Pendente | Metadados, orientação, thumbnails, previews e estado de processamento. |
+| 4 — Arquivos utilizáveis | Concluída | Upload retomável, Worker durável, biblioteca básica, download e capacidade. |
+| 5 — Imagens | Próxima; não iniciada | Metadados, orientação, thumbnails, previews e estado de processamento. |
 | 6 — Biblioteca | Pendente | Timeline, favoritos, lixeira, restauração e limpeza definitiva segura. |
 | 7 — Operação | Pendente | Arch/systemd, Tailscale/HTTPS, revisão de segurança e restauração de backup. |
 | 8 — Mobile futuro | Pendente | Contrato de sincronização e cliente MAUI Android; iOS depois. |
@@ -88,7 +88,23 @@ O suporte a configurações de produção está no código. O deploy Arch, os se
 
 **Aceite verificado localmente:** o adaptador publica, lê e exclui; duplicatas preservam identidade; conflito na lixeira e paths maliciosos são tratados; concorrência e retomada de Staging estão testadas no Windows com PostgreSQL nativo. Não há novos endpoints de arquivos nesta fase.
 
-Os [contratos de armazenamento](storage.md) detalham a entrega. Reconciliação automática, jobs duráveis, reservas e testes de reinício dos processos entram na Fase 4. Execução nativa Linux e persistência após reinício no filesystem Arch continuam pendentes; testes com falha injetada não equivalem a simular queda de energia.
+Os [contratos de armazenamento](storage.md) detalham essa fundação. A Fase 4 acrescenta jobs duráveis, reservas e recuperação de operações de upload. Execução nativa Linux e persistência após reinício no filesystem Arch continuam pendentes; testes com falha injetada não equivalem a simular queda de energia.
+
+### Fase 4 — Arquivos utilizáveis por API
+
+- [x] UploadSession, UploadChunk, BackgroundJob e BackgroundJobAttempt, índices e migration `20261008112515_UploadsDurableJobs`.
+- [x] `Nexora.Worker` separado, fila PostgreSQL, lease renovável, tentativas limitadas e falhas consultáveis.
+- [x] Criação, consulta, cancelamento, chunks binários numerados a partir de zero e conclusão assíncrona de uploads.
+- [x] Tamanho/hash real de cada chunk, reenvio idêntico e conflito para conteúdo diferente no mesmo índice.
+- [x] Montagem em streaming, verificação do hash final e persistência da montagem antes de remover chunks.
+- [x] Confirmação de Blob/Asset/upload/job em transação com lease válido; conclusão repetida preserva operação/resultado.
+- [x] Tentativas físicas rastreadas por UUID persistido antes da escrita e limpeza exclusiva antes de novo retry.
+- [x] Reservas conservadoras, limite de arquivo/chunk, timeouts, expiração de sessão aberta e limpeza terminal antes de liberar capacidade.
+- [x] Coleta de temporários internos antigos sem referência, excluindo escritores ativos; não coleta Blobs.
+- [x] Biblioteca ativa com cursor, detalhes, download autenticado por GET/HEAD com HTTP Range/ETag e `/api/storage`.
+- [x] Limite HTTP de chunk por rota; corpos JSON continuam limitados a 16 KiB.
+
+**Aceite verificado localmente:** restore com dependências travadas, build Release sem avisos/erros, migration aplicada ao banco de desenvolvimento e 129 testes aprovados, sem falhas ou ignorados. Os testes incluem retomada após reinício da API, concorrência, publicação interrompida, commit ambíguo, reservas, autorização, Range e renovação real de lease durante processamento demorado. API e Worker também iniciaram pela CLI; live/readiness retornaram `200`, OpenAPI expôs os contratos e rotas privadas recusaram acesso sem autenticação. Os contratos e o fluxo de execução estão em [uploads.md](uploads.md). Testes nativos no Arch, reinício de servidor e queda de energia continuam pendentes na Fase 7. Jobs de imagem, favoritos, edição e lixeira HTTP pertencem às próximas fases.
 
 ### Superfície HTTP disponível
 
@@ -102,8 +118,17 @@ Os [contratos de armazenamento](storage.md) detalham a entrega. Reconciliação 
 | `POST` | `/api/auth/logout` | Revogar a sessão autenticada atual. |
 | `GET` | `/api/devices` | Listar dispositivos da conta autenticada. |
 | `DELETE` | `/api/devices/{id}` | Revogar um dispositivo da própria conta. |
+| `POST` | `/api/uploads` | Criar sessão e reservar capacidade. |
+| `GET` | `/api/uploads/{id}` | Consultar progresso, operação e resultado/falha. |
+| `PUT` | `/api/uploads/{id}/chunks/{number}` | Confirmar chunk binário ou reenvio idêntico. |
+| `POST` | `/api/uploads/{id}/complete` | Solicitar finalização durável e repetir consulta de resultado. |
+| `DELETE` | `/api/uploads/{id}` | Cancelar sessão elegível. |
+| `GET` | `/api/assets` | Listar biblioteca ativa com paginação por cursor. |
+| `GET` | `/api/assets/{id}` | Consultar metadados do item ativo. |
+| `GET`, `HEAD` | `/api/assets/{id}/content` | Baixar original ou consultar headers, com Range/ETag. |
+| `GET` | `/api/storage` | Consultar tamanhos lógicos, consumo físico, reservas e volume. |
 
-Os contratos de autenticação, códigos de erro e instruções de recuperação estão em [authentication.md](authentication.md).
+Os contratos e códigos de erro estão em [authentication.md](authentication.md) e [uploads.md](uploads.md).
 
 ### Evidência registrada
 
@@ -112,30 +137,15 @@ Os contratos de autenticação, códigos de erro e instruções de recuperação
 | Fundação entregue | Commit `f0b48d7`. |
 | Identidade entregue | Commit `107d7df`. |
 | Armazenamento interno entregue | Commit `435e051`; migration aplicada ao banco local de desenvolvimento. |
-| Última validação da implementação, em 6 de outubro de 2026 | Restore em locked mode; build Release sem avisos/erros; 95 testes aprovados: 29 unitários e 66 de integração, zero falhas e zero ignorados. |
-| Verificação HTTP local com a migration da Fase 3 | Live, ready e OpenAPI responderam `200`; dispositivos sem autenticação `401`; `/api/uploads`, ainda não implementada, `404`. |
+| Validação da Fase 3, em 6 de outubro de 2026 | Restore em locked mode; build Release sem avisos/erros; 95 testes aprovados: 29 unitários e 66 de integração, zero falhas e zero ignorados. |
+| Arquivos por API / Worker | Commit `7873ec8`; migration `20261008112515_UploadsDurableJobs` aplicada ao banco local de desenvolvimento. |
+| Validação da Fase 4, em 8 de outubro de 2026 | Restore em locked mode; build Release com zero avisos/erros; 129 testes aprovados: 39 unitários e 90 de integração, zero falhas e zero ignorados. |
 
-Esses resultados são o registro da entrega da Fase 3 no Windows. Para verificar uma revisão posterior, execute os comandos de [development.md](development.md) e registre o novo resultado.
+Os resultados das fases 3 e 4 são do Windows com PostgreSQL nativo. Para verificar outra revisão, execute os comandos de [development.md](development.md) e registre o novo resultado.
 
 ## 4. Etapas que faltam
 
 As listas abaixo são trabalho planejado. Cada fase só será concluída após implementar suas entregas e verificar os critérios de aceite.
-
-### Fase 4 — Arquivos utilizáveis por API
-
-Depende do armazenamento e das regras de deduplicação da Fase 3.
-
-- [ ] Criar UploadSession, UploadChunk e BackgroundJob, com migrations e transições persistidas.
-- [ ] Criar `Nexora.Worker` com fila PostgreSQL, lease renovável, tentativas limitadas e falhas visíveis.
-- [ ] Implementar criação, consulta, cancelamento, chunks numerados e conclusão de uploads.
-- [ ] Validar tamanho real e hash de cada chunk; aceitar repetição idêntica e recusar conteúdo conflitante no mesmo índice.
-- [ ] Montar arquivos em streaming no Worker, verificar tamanho/hash final, publicar, resolver o Asset e concluir a sessão de forma repetível.
-- [ ] Implementar reservas, limites de escrita, expiração por inatividade e limpeza repetível de temporários.
-- [ ] Recuperar interrupções entre publicação física e commit no PostgreSQL.
-- [ ] Implementar listagem com cursor, detalhes, download autenticado com HTTP Range e `/api/storage`.
-- [ ] Definir limites próprios nas rotas de upload: a API atual limita corpos a 16 KiB, o que será ajustado para os chunks previstos.
-
-**Aceite:** um arquivo pode ser enviado, retomado após reinício, listado e baixado; conclusão repetida retorna a mesma operação/resultado; chunks fora de ordem, concorrência e cancelamento são testados; disco cheio e falhas entre banco/filesystem não produzem sucesso incorreto; acesso entre proprietários é recusado; memória usada no streaming não cresce proporcionalmente ao arquivo.
 
 ### Fase 5 — Fotos e derivados
 
@@ -192,23 +202,23 @@ Depende de uma API estável e da operação do backend.
 
 **Aceite inicial:** um dispositivo Android autentica, consulta a biblioteca e envia arquivos com retomada; trata revogação e necessidade de novo login; sincronização não cria duplicatas nem perde exclusões. O aceite de iOS será definido quando essa etapa começar.
 
-## 5. Parâmetros previstos para arquivos
+## 5. Parâmetros de arquivos e defaults futuros
 
-Estes valores ainda serão implementados nas fases de arquivos, imagens e lixeira. O storage interno já limita a escrita ao tamanho declarado por operação; não aplica quotas globais, reservas, expiração ou esses defaults. Validar `Storage:RootPath` e iniciar a API não cria os diretórios de conteúdo.
+Os parâmetros de upload estão implementados e são configuráveis na seção `Uploads`. Retenção da lixeira e processamento de imagens continuam futuros. Validar `Storage:RootPath` e iniciar a API não cria os diretórios de conteúdo; escritas criam diretórios privados sob a raiz configurada.
 
-| Parâmetro | Default planejado |
+| Parâmetro | Default / estado |
 | --- | --- |
 | Chunk | 8 MiB. |
 | Arquivo máximo | 20 GiB. |
 | Sessões abertas por usuário | 2, condicionadas à capacidade global. |
 | Temporários e reservas | 50 GiB. |
 | Margem mínima de espaço livre | 50 GiB. |
-| Reserva de montagem | Até duas vezes o tamanho declarado. |
+| Reserva de montagem | Duas vezes o tamanho declarado. |
 | Expiração de upload | 7 dias sem atividade. |
-| Retenção da lixeira | 30 dias. |
-| Processamento simultâneo | Uma montagem e uma imagem por vez. |
+| Retenção da lixeira | 30 dias, prevista para a Fase 6. |
+| Processamento simultâneo | Uma montagem por Worker; imagem prevista na Fase 5. |
 
-O teto de sessões não garante dois arquivos de 20 GiB simultâneos. O orçamento global e o espaço livre determinarão a admissão. `/api/storage` distinguirá biblioteca ativa, lixeira, Blobs físicos, derivados, temporários e reservas.
+O teto de sessões não garante dois arquivos de 20 GiB simultâneos. A admissão considera reservas existentes, temporários físicos, nova reserva e margem de espaço livre. `/api/storage` distingue biblioteca ativa, lixeira, Blobs físicos, derivados, temporários e reservas; o tamanho real do volume substitui qualquer quota fixa presumida de 500 GB. Os parâmetros de leases, tentativas e coleta de órfãos estão em [uploads.md](uploads.md).
 
 ## 6. Evoluções fora da primeira entrega
 
@@ -233,3 +243,4 @@ Ao concluir um incremento:
 | [Desenvolvimento](development.md) | Preparar o ambiente, aplicar migrations e executar a API/testes. |
 | [Autenticação](authentication.md) | Integrar os contratos já disponíveis e administrar a conta localmente. |
 | [Armazenamento](storage.md) | Consultar importação interna, deduplicação, publicação e recuperação por reenvio. |
+| [Uploads e Worker](uploads.md) | Integrar chunks, retomada, finalização, biblioteca/download e capacidade. |

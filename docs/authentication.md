@@ -49,7 +49,7 @@ O retorno de login e refresh contém `tokenType`, `accessToken`, `expiresIn`, `r
 
 Use `Authorization: Bearer <accessToken>` nos endpoints protegidos. Em login e refresh, omita um Authorization antigo: um bearer ainda válido criptograficamente, mas de sessão revogada, é rejeitado antes do endpoint anônimo. Tokens não devem ser enviados na URL, gravados em logs ou publicados em exemplos de diagnóstico. O servidor guarda apenas SHA-256 do refresh token aleatório de 256 bits; o cliente recebe o valor original uma única vez por emissão.
 
-O corpo de requisições está limitado a 16 KiB nesta fase; a Fase 4 definirá limites próprios para rotas de arquivo. `deviceName` aceita até 100 caracteres e `platform` até 32, sem controles ou valores em branco; `login` aceita até 254 caracteres. Respostas de `/api/*` utilizam `Cache-Control: no-store`.
+O corpo das requisições de autenticação está limitado a 16 KiB; chunks de arquivo têm limite próprio descrito em [uploads.md](uploads.md). `deviceName` aceita até 100 caracteres e `platform` até 32, sem controles ou valores em branco; `login` aceita até 254 caracteres. Respostas de `/api/*` utilizam `Cache-Control: no-store`.
 
 Login é limitado a cinco chamadas por IP/minuto; refresh a 30 chamadas por IP/minuto. Erros usam Problem Details e códigos estáveis, sem connection strings ou detalhes de exceções. Login inválido não distingue conta ausente de senha incorreta. Um `deviceId` inválido só é informado depois de a senha ser validada.
 
