@@ -1,8 +1,8 @@
 # Nexora — estado atual e próximas etapas
 
-Atualizado em **8 de outubro de 2026**. Código de referência da Fase 4: `7873ec8`. Aceite verificado localmente no Windows com PostgreSQL nativo.
+Atualizado em **8 de outubro de 2026**. Código de referência da Fase 5: `b4ecf15`. As fases 1 a 5 foram verificadas localmente no Windows com PostgreSQL nativo; a operação no Arch continua pendente.
 
-O Nexora já tem fundação, autenticação, armazenamento com deduplicação e arquivos por API: upload retomável, Worker, biblioteca básica e download. A próxima entrega é a Fase 5, com metadados, thumbnails e previews de imagens. Biblioteca completa, produção no Arch e clientes dependem das fases seguintes.
+O Nexora já tem fundação, autenticação, armazenamento com deduplicação e arquivos por API, além de metadados, thumbnails e previews de imagens na Fase 5. A próxima entrega é a Fase 6, com timeline, favoritos e lixeira. Produção no Arch e clientes dependem das fases seguintes.
 
 ## 1. O que o projeto pretende ser
 
@@ -20,7 +20,7 @@ O desenvolvimento começa pela API. O cliente mobile virá depois, inicialmente 
 - Blob representa os bytes imutáveis; Asset representa o item da biblioteca e suas permissões, nome e lixeira.
 - Conteúdo idêntico reutiliza o Asset existente, preservando seus metadados. Um item na lixeira exige restauração explícita; os endpoints de lixeira serão introduzidos na Fase 6.
 - O servidor será confiável e poderá ler os originais para processamento.
-- Thumbnails e previews começarão por JPEG, PNG e WebP. Outros formatos já podem ser enviados e baixados como arquivos originais.
+- Thumbnails e previews processam JPEG, PNG e WebP estáticos. Outros formatos, animações e imagens acima dos limites continuam disponíveis como originais.
 - Segurança, testes e recuperação acompanharão cada fase; operação em produção será validada na Fase 7.
 
 Os detalhes técnicos e as razões dessas decisões estão em [architecture.md](architecture.md).
@@ -34,8 +34,8 @@ Os detalhes técnicos e as razões dessas decisões estão em [architecture.md](
 | 2 — Identidade | Concluída | Administração local da conta, login, sessões, refresh e dispositivos. |
 | 3 — Armazenamento | Concluída | Blob/Asset, adaptador local, streaming, SHA-256 e deduplicação interna. |
 | 4 — Arquivos utilizáveis | Concluída | Upload retomável, Worker durável, biblioteca básica, download e capacidade. |
-| 5 — Imagens | Próxima; não iniciada | Metadados, orientação, thumbnails, previews e estado de processamento. |
-| 6 — Biblioteca | Pendente | Timeline, favoritos, lixeira, restauração e limpeza definitiva segura. |
+| 5 — Imagens | Concluída localmente | Metadados, orientação, thumbnails/previews PNG e processamento com limites. |
+| 6 — Biblioteca | Próxima; não iniciada | Timeline, favoritos, lixeira, restauração e limpeza definitiva segura. |
 | 7 — Operação | Pendente | Arch/systemd, Tailscale/HTTPS, revisão de segurança e restauração de backup. |
 | 8 — Mobile futuro | Pendente | Contrato de sincronização e cliente MAUI Android; iOS depois. |
 
@@ -104,7 +104,23 @@ Os [contratos de armazenamento](storage.md) detalham essa fundação. A Fase 4 a
 - [x] Biblioteca ativa com cursor, detalhes, download autenticado por GET/HEAD com HTTP Range/ETag e `/api/storage`.
 - [x] Limite HTTP de chunk por rota; corpos JSON continuam limitados a 16 KiB.
 
-**Aceite verificado localmente:** restore com dependências travadas, build Release sem avisos/erros, migration aplicada ao banco de desenvolvimento e 129 testes aprovados, sem falhas ou ignorados. Os testes incluem retomada após reinício da API, concorrência, publicação interrompida, commit ambíguo, reservas, autorização, Range e renovação real de lease durante processamento demorado. API e Worker também iniciaram pela CLI; live/readiness retornaram `200`, OpenAPI expôs os contratos e rotas privadas recusaram acesso sem autenticação. Os contratos e o fluxo de execução estão em [uploads.md](uploads.md). Testes nativos no Arch, reinício de servidor e queda de energia continuam pendentes na Fase 7. Jobs de imagem, favoritos, edição e lixeira HTTP pertencem às próximas fases.
+**Aceite verificado localmente:** restore com dependências travadas, build Release sem avisos/erros, migration aplicada ao banco de desenvolvimento e 129 testes aprovados, sem falhas ou ignorados. Os testes incluem retomada após reinício da API, concorrência, publicação interrompida, commit ambíguo, reservas, autorização, Range e renovação real de lease durante processamento demorado. API e Worker também iniciaram pela CLI; live/readiness retornaram `200`, OpenAPI expôs os contratos e rotas privadas recusaram acesso sem autenticação. Os contratos e o fluxo de execução estão em [uploads.md](uploads.md). Testes nativos no Arch, reinício de servidor e queda de energia continuam pendentes na Fase 7. Favoritos, edição e lixeira HTTP pertencem à Fase 6.
+
+### Fase 5 — Fotos, metadados e derivados
+
+- [x] BlobImage compartilhada por Blob, estados, captura local/UTC, dimensões orientadas, geração/hashes/tamanhos e migration `20261008122015_ImageMetadataAndDerivatives`.
+- [x] Jobs `ProcessImage` com alvo exclusivo, unicidade por Blob, leases, tentativas persistidas e fences de conclusão.
+- [x] Enfileiramento na mesma transação de conclusão do original; backfill idempotente de Blobs antigos compatíveis sem registro de imagem.
+- [x] SkiaSharp 4.153.1 e MetadataExtractor 2.9.3 com versões centralizadas e dependências nativas Linux incluídas.
+- [x] JPEG, PNG e WebP estáticos; orientação aplicada e PNGs de até 256/1280 px sem ampliar imagens menores.
+- [x] EXIF DateTimeOriginal/frações/offset original; preservação de horário local sem UTC inventado.
+- [x] Processo filho sem Host/banco/ambiente de segredos, protocolo por pipes limitado, watchdog de tempo e working set, limite próprio de heap gerenciado.
+- [x] Limites de entrada, dimensões, pixels, bitmaps e derivados; animação, corrupção e limites excedidos preservam o original.
+- [x] Publicação imutável por tentativa, validação do envelope PNG/CRCs, hashes/tamanhos e confirmação dos dois derivados em transação.
+- [x] Reservas de imagens no orçamento global e em `/api/storage`, mantidas até cleanup terminal; retries removem tentativas anteriores com acesso exclusivo.
+- [x] `image` opcional nos snapshots e endpoints GET/HEAD de thumbnail/preview, autorizados, verificados por hash/tamanho e com Range/ETag.
+
+**Aceite verificado localmente:** restore com dependências travadas, build Release sem avisos/erros, migration aplicada ao banco de desenvolvimento e 189 testes aprovados (50 unitários e 139 de integração), sem falhas ou ignorados. A suíte verifica JPEG/PNG/WebP no processo filho, EXIF sem fuso e com offset persistido no banco e exposto pela API, timeout com preservação do original, renovação real de lease e reversão/reaplicação da migration em banco isolado. API e Worker iniciaram pela CLI; live/readiness responderam `200`, OpenAPI incluiu os derivados e suas rotas recusaram acesso sem autenticação. Os [contratos de imagem](images.md) detalham campos, configuração e recuperação. Execução nativa Skia/Linux, limites de serviço, reinícios reais e restauração no Arch continuam pendentes na Fase 7. O processo filho mantém as permissões do Worker e a medição de memória é amostrada: esta entrega não equivale a sandbox de SO ou teto rígido de memória nativa.
 
 ### Superfície HTTP disponível
 
@@ -126,9 +142,11 @@ Os [contratos de armazenamento](storage.md) detalham essa fundação. A Fase 4 a
 | `GET` | `/api/assets` | Listar biblioteca ativa com paginação por cursor. |
 | `GET` | `/api/assets/{id}` | Consultar metadados do item ativo. |
 | `GET`, `HEAD` | `/api/assets/{id}/content` | Baixar original ou consultar headers, com Range/ETag. |
+| `GET`, `HEAD` | `/api/assets/{id}/thumbnail` | Servir thumbnail PNG pronto e autorizado, com Range/ETag. |
+| `GET`, `HEAD` | `/api/assets/{id}/preview` | Servir preview PNG pronto e autorizado, com Range/ETag. |
 | `GET` | `/api/storage` | Consultar tamanhos lógicos, consumo físico, reservas e volume. |
 
-Os contratos e códigos de erro estão em [authentication.md](authentication.md) e [uploads.md](uploads.md).
+Os contratos e códigos de erro estão em [authentication.md](authentication.md), [uploads.md](uploads.md) e [images.md](images.md).
 
 ### Evidência registrada
 
@@ -140,25 +158,14 @@ Os contratos e códigos de erro estão em [authentication.md](authentication.md)
 | Validação da Fase 3, em 6 de outubro de 2026 | Restore em locked mode; build Release sem avisos/erros; 95 testes aprovados: 29 unitários e 66 de integração, zero falhas e zero ignorados. |
 | Arquivos por API / Worker | Commit `7873ec8`; migration `20261008112515_UploadsDurableJobs` aplicada ao banco local de desenvolvimento. |
 | Validação da Fase 4, em 8 de outubro de 2026 | Restore em locked mode; build Release com zero avisos/erros; 129 testes aprovados: 39 unitários e 90 de integração, zero falhas e zero ignorados. |
+| Imagens e derivados | Commit `b4ecf15`; migration `20261008122015_ImageMetadataAndDerivatives` aplicada ao banco local de desenvolvimento. |
+| Validação da Fase 5, em 8 de outubro de 2026 | Restore em locked mode; build Release com zero avisos/erros; 189 testes aprovados: 50 unitários e 139 de integração, zero falhas e zero ignorados; API/Worker e health checks verificados pela CLI. |
 
-Os resultados das fases 3 e 4 são do Windows com PostgreSQL nativo. Para verificar outra revisão, execute os comandos de [development.md](development.md) e registre o novo resultado.
+Os resultados das fases 3, 4 e 5 são do Windows com PostgreSQL nativo. Para verificar outra revisão, execute os comandos de [development.md](development.md) e registre o novo resultado.
 
 ## 4. Etapas que faltam
 
 As listas abaixo são trabalho planejado. Cada fase só será concluída após implementar suas entregas e verificar os critérios de aceite.
-
-### Fase 5 — Fotos e derivados
-
-Depende de originais publicados e do Worker durável.
-
-- [ ] Acrescentar dimensões, data de captura e estado de processamento.
-- [ ] Integrar SkiaSharp e MetadataExtractor e verificar as dependências nativas no Arch Linux.
-- [ ] Corrigir orientação e gerar thumbnail de até 256 px e preview de até 1280 px, sem ampliar imagens menores.
-- [ ] Processar inicialmente JPEG, PNG e WebP com limites de pixels, memória e tempo.
-- [ ] Preservar datas EXIF sem fuso; usar upload quando não houver captura UTC confiável.
-- [ ] Servir derivados autorizados em `/thumbnail` e `/preview`; preservar o original quando o processamento falhar.
-
-**Aceite:** imagens compatíveis geram derivados corretos; formatos sem suporte continuam disponíveis como originais; arquivos malformados e imagens acima dos limites falham de forma controlada; falha de preview mantém o original acessível.
 
 ### Fase 6 — Biblioteca, timeline e lixeira
 
@@ -182,6 +189,7 @@ Depende dos fluxos de arquivos e biblioteca verificados.
 - [ ] Configurar Tailscale Serve com HTTPS, grants restritas e Funnel desativado; verificar o acesso no ambiente real.
 - [ ] Verificar Data Protection com certificado no Linux e recuperação de chaves fora da instalação.
 - [ ] Revisar autorização, limites, dependências nativas e comportamento após reinício de serviços/servidor.
+- [ ] Verificar carga e processamento Skia no Arch, limites de memória de serviço e recuperação do processo filho após timeout/reinício.
 - [ ] Documentar e observar espaço livre, reservas, temporários, processamento e tarefas esgotadas.
 - [ ] Documentar backup manual consistente de PostgreSQL, storage, configuração e chaves, com cópia independente do servidor.
 - [ ] Executar restauração em ambiente isolado e verificar banco, login, originais e derivados recuperados.
@@ -204,7 +212,7 @@ Depende de uma API estável e da operação do backend.
 
 ## 5. Parâmetros de arquivos e defaults futuros
 
-Os parâmetros de upload estão implementados e são configuráveis na seção `Uploads`. Retenção da lixeira e processamento de imagens continuam futuros. Validar `Storage:RootPath` e iniciar a API não cria os diretórios de conteúdo; escritas criam diretórios privados sob a raiz configurada.
+Os parâmetros de upload e imagens estão implementados nas seções `Uploads` e `Images`. Retenção da lixeira continua futura. Validar `Storage:RootPath` e iniciar a API não cria os diretórios de conteúdo; escritas criam diretórios privados sob a raiz configurada.
 
 | Parâmetro | Default / estado |
 | --- | --- |
@@ -216,9 +224,13 @@ Os parâmetros de upload estão implementados e são configuráveis na seção `
 | Reserva de montagem | Duas vezes o tamanho declarado. |
 | Expiração de upload | 7 dias sem atividade. |
 | Retenção da lixeira | 30 dias, prevista para a Fase 6. |
-| Processamento simultâneo | Uma montagem por Worker; imagem prevista na Fase 5. |
+| Processamento simultâneo | Uma montagem e uma imagem por Worker, em rotinas separadas. |
+| Thumbnail / preview | Lado máximo de 256 / 1280 px, PNG, sem ampliação. |
+| Entrada / pixels de imagem | 32 MiB / 24.000.000 pixels. |
+| Reserva por imagem | Duas vezes o máximo de derivado: 16 MiB com defaults. |
+| Watchdog de imagem | 30 segundos e working set observado de 512 MiB; heap gerenciado de 256 MiB. |
 
-O teto de sessões não garante dois arquivos de 20 GiB simultâneos. A admissão considera reservas existentes, temporários físicos, nova reserva e margem de espaço livre. `/api/storage` distingue biblioteca ativa, lixeira, Blobs físicos, derivados, temporários e reservas; o tamanho real do volume substitui qualquer quota fixa presumida de 500 GB. Os parâmetros de leases, tentativas e coleta de órfãos estão em [uploads.md](uploads.md).
+O teto de sessões não garante dois arquivos de 20 GiB simultâneos. A admissão considera reservas existentes de uploads/imagens, temporários físicos, nova reserva e margem de espaço livre. `/api/storage` distingue biblioteca ativa, lixeira, Blobs físicos, derivados, temporários e reservas; o tamanho real do volume substitui qualquer quota fixa presumida de 500 GB. Opções completas estão em [uploads.md](uploads.md) e [images.md](images.md).
 
 ## 6. Evoluções fora da primeira entrega
 
@@ -244,3 +256,4 @@ Ao concluir um incremento:
 | [Autenticação](authentication.md) | Integrar os contratos já disponíveis e administrar a conta localmente. |
 | [Armazenamento](storage.md) | Consultar importação interna, deduplicação, publicação e recuperação por reenvio. |
 | [Uploads e Worker](uploads.md) | Integrar chunks, retomada, finalização, biblioteca/download e capacidade. |
+| [Imagens e derivados](images.md) | Integrar metadados, estados e PNGs autorizados; consultar limites, processamento e recuperação. |

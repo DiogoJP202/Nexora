@@ -1,6 +1,6 @@
 # Armazenamento e identidade do conteúdo
 
-A Fase 3 introduziu modelos e casos de uso internos para importar conteúdo. A Fase 4 reutiliza essas invariantes em uploads retomáveis e downloads autenticados, acrescentando Worker, tentativas rastreadas e limpeza durável. Os contratos HTTP estão em [uploads.md](uploads.md).
+A Fase 3 introduziu modelos e casos de uso internos para importar conteúdo. A Fase 4 acrescentou uploads retomáveis, downloads, Worker e limpeza durável. A Fase 5 aplica publicação imutável e tentativas rastreadas a thumbnails/previews; seus contratos estão em [images.md](images.md), e os de arquivos em [uploads.md](uploads.md).
 
 ## Modelo e identidade
 
@@ -8,7 +8,9 @@ A Fase 3 introduziu modelos e casos de uso internos para importar conteúdo. A F
 
 `Asset` representa um item de uma conta: UUID, proprietário, Blob, nome original, upload UTC, favorito e `DeletedAt`. O par `(OwnerId, BlobId)` é único, inclusive quando o item está na lixeira. A mesma sequência de bytes pode ter Assets de proprietários diferentes, compartilhando um Blob físico.
 
-Um reenvio da mesma conta preserva ID, nome, data de upload e favorito do Asset existente. Se estiver na lixeira, o caso de uso retorna `AssetInTrash` com o item da própria conta e exige restauração explícita. As ações HTTP de lixeira ainda pertencem à Fase 6. Não há `ReferenceCount` persistido. A coleta automática de Blobs sem referências pertence à Fase 6; a limpeza atual remove somente temporários elegíveis.
+Um reenvio da mesma conta preserva ID, nome, data de upload e favorito do Asset existente. Se estiver na lixeira, o caso de uso retorna `AssetInTrash` com o item da própria conta e exige restauração explícita. As ações HTTP de lixeira ainda pertencem à Fase 6. Não há `ReferenceCount` persistido. A coleta automática de Blobs sem referências pertence à Fase 6; a limpeza atual remove temporários elegíveis e tentativas de derivados abandonadas.
+
+`BlobImage` pertence ao Blob e compartilha dimensões, captura e estado entre Assets dos mesmos bytes. Thumbnail e preview publicados usam uma geração de tentativa distinta da identidade física do original. Confirmar ambos no banco torna a imagem `Ready`; falhar nunca remove ou invalida o Blob original.
 
 Nome original é metadado, nunca caminho físico. O domínio limita nomes a 255 caracteres e rejeita valores em branco, controles, `/`, `\`, `:`, `.` e `..`. As chaves físicas são geradas por UUID e têm representação canônica, por exemplo:
 
@@ -28,6 +30,8 @@ O hash identifica conteúdo; o UUID identifica a geração física. Reutilizar u
 | `IAssetIngestionService` | Coordenar validação, staging, hashing, publicação, deduplicação e limpeza. |
 | `ITrackedTemporaryStorage` | Criar montagem por chave de tentativa persistida e limpar seus arquivos com exclusão exclusiva. |
 | `ITrackedBlobStorage` | Publicar Blob usando uma chave de tentativa persistida para o arquivo intermediário. |
+| `IDerivativeStorage` | Publicar PNG imutável por geração/tipo, ler, verificar hash/tamanho e limpar uma tentativa preservando resultado confirmado. |
+| `IImageWorkStore` | Coordenar fila, leases, metadados, reservas e cleanup de imagens no PostgreSQL. |
 
 Os contratos estão em Application. Domain não depende de EF Core, ASP.NET ou filesystem. Infrastructure implementa `LocalFileBlobStorage`, `LocalFileTemporaryStorage` e `PostgresContentCatalog`. Os adaptadores são singletons; catálogo e caso de uso são scoped, com um DbContext por operação. Operações concorrentes devem usar scopes distintos.
 
@@ -42,7 +46,7 @@ Os resultados são `Created`, `Reused`, `AssetInTrash` e `BlobUnavailable`. Os s
 3. Em transação curta, verificar a conta e obter ou criar Blob `Staging` pelo hash. A intenção é confirmada antes da publicação física.
 4. Se o Blob estiver `Staging`, publicar a partir do temporário, verificando novamente tamanho e hash. Uma chave existente só é aceita quando seu conteúdo é idêntico.
 5. Se já estiver `Ready`, verificar tamanho e SHA-256 do conteúdo físico antes de reutilizá-lo. Ausência ou corrupção gera erro de integridade; conteúdo existente não é sobrescrito para esconder a falha.
-6. Em nova transação, confirmar o estado do Blob, marcar `Ready` e criar/reutilizar o Asset. Estado `Deleting` impede criação de referência e retorna indisponibilidade.
+6. Em nova transação, confirmar o estado do Blob, marcar `Ready` e criar/reutilizar o Asset. Para JPEG/PNG/WebP, registrar imagem e job de processamento na mesma transação, caso ainda não existam. Estado `Deleting` impede criação de referência e retorna indisponibilidade.
 7. Excluir o temporário de forma repetível, inclusive quando a operação falha. Se operação e limpeza falharem, ambas as causas permanecem em `AggregateException`.
 
 O catálogo serializa conteúdo pelo mesmo advisory lock transacional derivado do SHA-256, seguido de locks de Blob e Asset. Índices únicos também protegem a identidade no banco. As transações não permanecem abertas durante a cópia do arquivo. O mecanismo de [locks PostgreSQL](https://www.postgresql.org/docs/18/explicit-locking.html) permite coordenar processos distintos.
@@ -56,12 +60,16 @@ A disposição usada é:
 ```text
 <RootPath>/
   blobs/<prefixos>/<blob-uuid>
+  thumbnails/<prefixos>/<attempt-uuid>.png
+  previews/<prefixos>/<attempt-uuid>.png
+  thumbnails/<prefixos>/<attempt-uuid>.png.publishing
+  previews/<prefixos>/<attempt-uuid>.png.publishing
   temp/<temporary-uuid>.chunk
   temp/<temporary-uuid>.part
   temp/<publication-uuid>.publishing
 ```
 
-Os buffers de leitura/escrita têm 64 KiB. O conteúdo é processado em streaming com cancelamento; não há alocação proporcional ao tamanho completo do arquivo. `.part` e `.publishing` representam tentativas incompletas. No Worker, o UUID da tentativa está persistido antes da escrita; um retry limpa tentativas anteriores antes de começar nova montagem. A montagem `.chunk` é registrada antes de remover chunks de origem e permanece referenciada até a limpeza terminal.
+Os buffers de leitura/escrita de originais têm 64 KiB. Upload e download usam streaming sem alocação proporcional ao arquivo completo. A decodificação de imagem usa buffers limitados no processo filho e PNGs limitados em memória; é uma operação diferente, descrita em [images.md](images.md). `.part` e `.publishing` representam tentativas incompletas. O UUID da tentativa está persistido antes da escrita; um retry limpa tentativas anteriores antes de começar nova montagem ou imagem. A montagem `.chunk` é registrada antes de remover chunks de origem e permanece referenciada até a limpeza terminal.
 
 Os diretórios de storage recebem ACL para o usuário Windows atual e SYSTEM, ou modo `0700` no Linux; arquivos criados no Linux usam `0600`. Os adaptadores verificam a raiz, seus ancestrais, diretórios internos e arquivos, recusando symlinks/junctions e chaves não canônicas. O usuário do serviço e o administrador são confiáveis: outro processo com a mesma credencial não deve substituir diretórios durante operações.
 
@@ -73,7 +81,9 @@ Se a sincronização falhar depois de publicar um Blob, o arquivo publicado é p
 
 ## MIME e originais
 
-A detecção preliminar reconhece assinaturas de JPEG, PNG e WebP, sem usar extensão ou MIME do cliente. Demais conteúdos recebem `application/octet-stream`. Reconhecer a assinatura não significa decodificar ou validar uma imagem; arquivos continuam opacos. Decodificação com limites, orientação, metadados e derivados verificados entrarão na Fase 5.
+A detecção preliminar reconhece assinaturas de JPEG, PNG e WebP, sem usar extensão ou MIME do cliente. Demais conteúdos recebem `application/octet-stream`. Reconhecer a assinatura apenas seleciona trabalho de imagem; não comprova validade. A Fase 5 verifica container, tamanho, hash, codec, dimensões/pixels e limites antes de publicar PNGs reencodificados. Originais continuam opacos e são baixados como attachment, inclusive se o processamento falhar ou recusar animação.
+
+A API serve somente derivados confirmados, autenticados e verificados por hash/tamanho a cada acesso. A publicação valida envelope PNG e CRCs sem carregar um codec na API. Essa validação e os metadados completos são pré-condições do estado de imagem `Ready`.
 
 ## Recuperação e limites desta entrega
 
@@ -87,7 +97,7 @@ A validação local desta entrega utiliza Windows e PostgreSQL nativo. A execuç
 
 ## Migrations e testes
 
-`20261006114248_ContentBlobsAssets` acrescenta Blobs e Assets; `20261008112515_UploadsDurableJobs` acrescenta uploads e trabalho durável. Migrations permanecem explícitas:
+`20261006114248_ContentBlobsAssets` acrescenta Blobs e Assets; `20261008112515_UploadsDurableJobs` acrescenta uploads e trabalho durável; `20261008122015_ImageMetadataAndDerivatives` acrescenta imagens e generaliza os targets dos jobs. Migrations permanecem explícitas:
 
 ```powershell
 $env:ASPNETCORE_ENVIRONMENT = 'Development'

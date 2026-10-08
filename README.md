@@ -2,9 +2,9 @@
 
 Nuvem privada para fotos, vídeos e arquivos pessoais, construída com .NET 10, ASP.NET Core, EF Core e PostgreSQL 18. O destino de produção é um servidor Arch Linux, com systemd e acesso privado por Tailscale.
 
-## Estado atual: Fase 4
+## Estado atual: Fase 5
 
-A API inclui autenticação com Identity, access tokens opacos, refresh com rotação, sessões e revogação de dispositivos, além da fundação de configuração, PostgreSQL, migrations e health checks. Os arquivos podem ser enviados em chunks retomáveis, finalizados pelo Worker, listados e baixados com HTTP Range. Blob/Asset mantêm armazenamento imutável, SHA-256 e deduplicação. A conta administrativa é criada somente por comando local. Processamento de mídia entra na Fase 5.
+A API inclui autenticação com Identity, tokens opacos, sessões e revogação de dispositivos, além de configuração validada, PostgreSQL, migrations e health checks. Arquivos podem ser enviados em chunks retomáveis, finalizados pelo Worker, listados e baixados com HTTP Range. JPEG, PNG e WebP estáticos recebem metadados, orientação corrigida, thumbnail e preview autenticados. Blob/Asset mantêm armazenamento imutável, SHA-256 e deduplicação; falha de imagem preserva o original. A conta administrativa é criada somente por comando local. A Fase 5 foi validada localmente no Windows; a Fase 6 acrescentará timeline, favoritos e lixeira.
 
 Os projetos atuais são `Nexora.Api`, `Nexora.Application`, `Nexora.Domain`, `Nexora.Infrastructure`, `Nexora.Worker`, `Nexora.UnitTests` e `Nexora.IntegrationTests`. O cliente MAUI entra na Fase 8.
 
@@ -37,7 +37,7 @@ $env:DOTNET_ENVIRONMENT = 'Development'
 dotnet run --project src/Nexora.Worker
 ```
 
-Em Development, o Worker compartilha o identificador de User Secrets da API. Sem o Worker, chunks podem ser recebidos, mas conclusões ficam pendentes. Consulte [uploads e Worker](docs/uploads.md) para o fluxo completo e as políticas de capacidade.
+Em Development, o Worker compartilha o identificador de User Secrets da API. Sem o Worker, chunks podem ser recebidos, mas conclusões e processamento de imagens ficam pendentes. Consulte [uploads e Worker](docs/uploads.md) para o fluxo de arquivos e [imagens](docs/images.md) para metadados, limites e recuperação de derivados. A decodificação usa processo filho com watchdog; a validação nativa no Arch permanece prevista para a Fase 7.
 
 O bootstrap solicita email e senha interativamente, sem exibir a senha. Execute-o uma vez após aplicar migrations; a API não cria administrador automaticamente nem oferece registro público. Consulte [autenticação](docs/authentication.md) para login, dispositivos e recuperação local da conta.
 
@@ -52,6 +52,7 @@ A API de desenvolvimento escuta em `http://127.0.0.1:5100`:
 | `/api/devices` | Listagem autenticada; `DELETE /api/devices/{id}` revoga o dispositivo. |
 | `/api/uploads` | Criação autenticada de sessão; consulta, chunks, conclusão e cancelamento por ID. |
 | `/api/assets` | Biblioteca paginada; detalhes e download em `/api/assets/{id}/content`. |
+| `/api/assets/{id}/thumbnail`, `/api/assets/{id}/preview` | Derivados PNG autenticados por GET/HEAD, com Range e ETag, somente quando prontos. |
 | `/api/storage` | Tamanhos lógicos, consumo físico, temporários, reservas e espaço do volume. |
 
 Health checks retornam apenas um status sanitizado. A aplicação não aplica migrations automaticamente.
@@ -72,5 +73,6 @@ Testes unitários, HTTP/configuração e filesystem executam sem PostgreSQL. Tes
 - [Autenticação](docs/authentication.md): conta única, contratos HTTP, tokens, revogação e chaves de proteção.
 - [Armazenamento](docs/storage.md): identidade de conteúdo, contratos internos, publicação, deduplicação e recuperação por reenvio.
 - [Uploads e Worker](docs/uploads.md): contratos HTTP, retomada, finalização durável, download e capacidade.
+- [Imagens e derivados](docs/images.md): metadados, estados, configuração, processo nativo, publicação e recuperação.
 
 Segredos, binários PostgreSQL, dados de banco e arquivos pessoais ficam fora do repositório. Nexora é armazenamento; backups do banco e do conteúdo continuam necessários.

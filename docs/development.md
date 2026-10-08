@@ -1,6 +1,6 @@
 # Desenvolvimento local
 
-Execute os comandos deste guia na raiz do repositório. As fases 1 a 4 entregam fundação, autenticação, armazenamento com deduplicação e arquivos por API. API e Worker são processos separados que compartilham PostgreSQL e a raiz de storage.
+Execute os comandos deste guia na raiz do repositório. As fases 1 a 5 entregam fundação, autenticação, arquivos por API e processamento inicial de imagens. API e Worker são processos separados que compartilham PostgreSQL e a raiz de storage.
 
 ## SDK e dependências
 
@@ -14,6 +14,8 @@ dotnet build Nexora.sln
 ```
 
 Para reproduzir exatamente as dependências já registradas, use `dotnet restore Nexora.sln --locked-mode`. Atualizações de dependências exigem revisão das versões e dos arquivos de lock.
+
+A Fase 5 usa SkiaSharp 4.153.1, seu pacote `SkiaSharp.NativeAssets.Linux.NoDependencies` e MetadataExtractor 2.9.3. O restore inclui dependências nativas; sua presença não substitui a validação no Arch. A API não decodifica imagens durante downloads; o Worker usa processo filho do próprio executável para a decodificação. Consulte [images.md](images.md) para limites e requisitos.
 
 ## PostgreSQL 18 fora do Nextcloud
 
@@ -67,7 +69,7 @@ O banco `nexora_dev` pertence à aplicação local. `nexora_test` e a role corre
 | `DataProtection:CertificatePath` | Não necessário no Windows; desenvolvimento Linux permite key ring sem certificado. | Obrigatório em Linux fora de Development: PFX RSA protegido com chave privada. |
 | `DataProtection:CertificatePassword` | Segredo opcional para o PFX. | Fornecido fora do Git junto aos demais segredos. |
 
-A API e o Worker utilizam os providers nativos de configuração e acrescentam variáveis com prefixo `NEXORA_`. O provider adicional é carregado por último e pode sobrescrever os demais valores. Use dois underscores para hierarquia: `NEXORA_Storage__RootPath`, `NEXORA_ConnectionStrings__Nexora` e `NEXORA_Uploads__ChunkSizeBytes`. `NEXORA_STORAGE_PATH` não corresponde à configuração atual. Ambos validam opções de banco, storage e uploads na inicialização; mantenha os mesmos limites nos dois processos.
+A API e o Worker utilizam os providers nativos de configuração e acrescentam variáveis com prefixo `NEXORA_`. O provider adicional é carregado por último e pode sobrescrever os demais valores. Use dois underscores para hierarquia: `NEXORA_Storage__RootPath`, `NEXORA_ConnectionStrings__Nexora`, `NEXORA_Uploads__ChunkSizeBytes` e `NEXORA_Images__MaximumInputBytes`. `NEXORA_STORAGE_PATH` não corresponde à configuração atual. Ambos validam opções de banco, storage, uploads e imagens na inicialização; mantenha os mesmos limites nos dois processos.
 
 User Secrets da API e do Worker usam o identificador `Nexora.Api.Development`, carregado em Development. Para registrar a connection string, substitua a senha do exemplo localmente:
 
@@ -97,7 +99,7 @@ Um servidor PostgreSQL temporariamente indisponível deixa readiness em falha; c
 
 ## Migrations explícitas
 
-A migration inicial configura Identity; a Fase 2 acrescenta dispositivos, sessões e refresh tokens; `20261006114248_ContentBlobsAssets`, da Fase 3, acrescenta Blobs e Assets. `20261008112515_UploadsDurableJobs` acrescenta sessões/chunks de upload, jobs e suas tentativas rastreadas. Aplicar migrations não cria administrador. Toda alteração de schema passa por migration versionada e revisão.
+A migration inicial configura Identity; a Fase 2 acrescenta dispositivos, sessões e refresh tokens; `20261006114248_ContentBlobsAssets`, da Fase 3, acrescenta Blobs e Assets. `20261008112515_UploadsDurableJobs` acrescenta sessões/chunks de upload, jobs e suas tentativas rastreadas. `20261008122015_ImageMetadataAndDerivatives` acrescenta BlobImages e o alvo Blob para jobs de imagem. Aplicar migrations não cria administrador. Toda alteração de schema passa por migration versionada e revisão.
 
 Com a configuração da API de desenvolvimento disponível:
 
@@ -114,6 +116,8 @@ dotnet ef migrations add NomeDaAlteracao --project src/Nexora.Infrastructure --s
 ```
 
 Revise o SQL e o impacto de cada migration antes de aplicá-la. API, Worker e health checks nunca executam `Migrate` na inicialização. Em produção, migrations serão uma operação explícita do deploy com credencial apropriada, antes de disponibilizar a nova versão; não embutir uma senha de produção no comando ou no repositório.
+
+Reverter a migration de imagens remove registros/metadados e jobs de imagem, mantendo originais/uploads, e deixa arquivos PNG no storage. Isso não é rollback sem perda nem limpeza de derivados. Pare processos que gravam, preserve backup consistente e planeje recuperação de banco/storage antes de reverter uma atualização; os limites estão em [images.md](images.md).
 
 ## Criar ou recuperar a conta administrativa
 
@@ -162,9 +166,13 @@ $env:DOTNET_ENVIRONMENT = 'Development'
 dotnet run --project src/Nexora.Worker
 ```
 
-O launch profile também define Development. O Worker carrega `appsettings.json` a partir da pasta do executável, lê os mesmos User Secrets da API em Development e aceita overrides `NEXORA_`. Ele não escuta HTTP e não requer o diretório de chaves de autenticação da API. Configure a mesma conexão, raiz e opções de uploads nos dois processos. Variáveis de ambiente são locais a cada terminal: um override na janela da API não se propaga ao Worker.
+O launch profile também define Development. O Worker carrega `appsettings.json` a partir da pasta do executável, lê os mesmos User Secrets da API em Development e aceita overrides `NEXORA_`. Ele não escuta HTTP e não requer o diretório de chaves de autenticação da API. Configure a mesma conexão, raiz e opções de uploads/imagens nos dois processos. Variáveis de ambiente são locais a cada terminal: um override na janela da API não se propaga ao Worker.
 
-O processo executa uma montagem por vez, renova leases e mantém expiração/limpeza em paralelo. Sem Worker, uma conclusão permanece `Finalizing`. Para interromper localmente, use Ctrl+C; um job cujo lease ficou ativo pode ser recuperado quando ele expirar. O contrato e os estados consultáveis estão em [uploads.md](uploads.md).
+O processo executa uma montagem e uma imagem por vez em rotinas independentes, renova leases e mantém expiração/limpeza em paralelo. Sem Worker, uma conclusão permanece `Finalizing` e imagens ficam pendentes. Para interromper localmente, use Ctrl+C; um job cujo lease ficou ativo pode ser recuperado quando ele expirar. Os contratos estão em [uploads.md](uploads.md) e [images.md](images.md).
+
+Após aplicar a migration de imagens e iniciar o Worker, Blobs antigos `Ready` compatíveis, sem registro de imagem, entram automaticamente na fila em lotes de até 100 por manutenção. Para verificar a entrega, envie um JPEG/PNG/WebP estático válido, aguarde upload `Completed` e imagem `Ready`, consulte metadados e baixe `/thumbnail` e `/preview`. Verifique também `HEAD`, um Range e um original acima dos limites de imagem: a falha de processamento deve preservar seu download original. A listagem mantém ordem por upload; timeline será implementada na Fase 6.
+
+O filho `render-image` é iniciado automaticamente, recebe somente parâmetros/bytes por pipes e executa com a credencial do Worker. Watchdogs limitam tempo, protocolo e working set observado; o heap gerenciado tem limite próprio. Isso não é uma sandbox de SO nem um limite rígido de memória nativa. Publique/instale o Worker com todos os arquivos de saída e dependências nativas. Isolamento e `MemoryMax` de serviço serão preparados e testados no Arch na Fase 7.
 
 ## Testes unitários e de integração
 
@@ -189,8 +197,8 @@ Testes de autenticação usam Data Protection efêmero por padrão para não toc
 
 Cada fixture cria um banco `nexora_it_<guid>` e aplica migrations nesse banco. A limpeza é restrita ao identificador criado pela própria fixture e a seu prefixo; nunca apontar testes à produção. Bancos que sobrarem após uma interrupção devem ser examinados pelo administrador e removidos somente quando for confirmado que pertencem à execução interrompida, sem comandos de exclusão por wildcard.
 
-Testes de conteúdo e uploads usam diretórios próprios sob a pasta temporária do sistema, com limpeza restrita ao caminho gerado pela fixture. Verificam streams sem seek, publicação sem sobrescrita, limites reais de bytes, cancelamento, junctions, deduplicação concorrente, chunks, leases, retomada, limpeza, capacidade e downloads. Não usam o storage pessoal configurado na API.
+Testes de conteúdo, uploads e imagens usam diretórios próprios sob a pasta temporária do sistema, com limpeza restrita ao caminho gerado pela fixture. Verificam streams sem seek, publicação sem sobrescrita, limites reais de bytes, cancelamento, junctions, deduplicação concorrente, chunks, leases, retomada, limpeza, capacidade e downloads. Imagens acrescentam orientação, captura EXIF, derivados autorizados, limites, protocolo do filho e preservação do original. Não usam o storage pessoal configurado na API.
 
-O [guia de armazenamento](storage.md) descreve os contratos internos; [uploads.md](uploads.md) descreve os limites de admissão, reservas e recuperação durável da Fase 4. Não há quota fixa de 500 GB: capacidade e espaço livre vêm do volume. Os caminhos nativos de publicação, sincronização e locks Linux precisam de validação no Arch; os resultados locais desta fase são de Windows. Testes de falha injetada e recuperação de lease não comprovam persistência após queda de energia.
+O [guia de armazenamento](storage.md) descreve os contratos internos; [uploads.md](uploads.md) e [images.md](images.md) descrevem admissão, reservas e recuperação durável. Não há quota fixa de 500 GB: capacidade e espaço livre vêm do volume. Os caminhos nativos de publicação, sincronização, locks Linux e Skia precisam de validação no Arch; os resultados locais são de Windows. Testes de falha injetada e recuperação de lease não comprovam persistência após queda de energia.
 
 Esses comandos descrevem a validação disponível; a documentação não representa um relatório de testes de uma execução específica.

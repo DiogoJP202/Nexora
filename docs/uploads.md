@@ -89,13 +89,13 @@ Listagem, detalhes e conteúdo incluem somente Assets ativos da própria conta c
 
 Originais usam `application/octet-stream`, `Content-Disposition: attachment` e `X-Content-Type-Options: nosniff`. O nome do Asset aparece no download, nunca no caminho físico. O stream suporta `Range`, `If-Range`, `If-None-Match` e `If-Modified-Since` pela implementação nativa do ASP.NET Core, com `206`, `304` e `416` conforme a requisição. `HEAD` consulta os headers sem transferir os bytes. O ETag identifica a geração Blob e `Last-Modified` usa a data do Asset. Requisições `/api/*` recebem `Cache-Control: no-store`.
 
-Favoritos, edição, exclusão lógica, restauração, timeline e derivados ainda dependem das fases 5/6.
+Snapshots de Asset incluem `image` opcional, com estado, metadados e disponibilidade de thumbnail e preview. O upload concluído pode anteceder o processamento da imagem. Os derivados PNG autenticados por GET/HEAD, Range e ETag estão em [images.md](images.md). Favoritos, edição, exclusão lógica, restauração e timeline entram na Fase 6.
 
 ## Worker e fronteiras de recuperação
 
 O Worker usa o Host nativo do .NET, sem broker adicional. `BackgroundJobs` guarda o trabalho, e `BackgroundJobAttempts` guarda cada UUID de tentativa antes de qualquer montagem/publicação. A aquisição combina bloqueio de upload e `FOR UPDATE SKIP LOCKED`; jobs com lease expirado podem ser reclamados. Todas as mutações do processamento verificam job, upload, token e prazo do lease.
 
-Uma montagem executa por vez em cada Worker. Renovação e manutenção usam scopes próprios para não compartilhar DbContext com a cópia. Interromper o processo ou perder a renovação cancela o processamento; o lease persistido permite retry. O desenho assume um Worker de produção; iniciar vários processos aumenta a concorrência total, embora os locks preservem a identidade e as leases.
+Uma montagem e uma imagem executam por vez em cada Worker, em rotinas separadas. Renovação e manutenção usam scopes próprios para não compartilhar DbContext com o processamento. Interromper o processo ou perder a renovação cancela o processamento; o lease persistido permite retry. O desenho assume um Worker de produção; iniciar vários processos aumenta a concorrência total, embora os locks preservem a identidade e as leases.
 
 O processamento segue esta ordem:
 
@@ -104,7 +104,7 @@ O processamento segue esta ordem:
 3. Confirmar a montagem na UploadSession antes de excluir chunks. Commit sem confirmação mantém a geração, permitindo recuperação posterior.
 4. Remover chunks físicos e seus registros de forma repetível. A montagem persistida permite continuar mesmo que a interrupção ocorra entre exclusão física e commit da remoção.
 5. Obter ou criar Blob `Staging`, publicar usando `.publishing` da tentativa ou verificar o Blob `Ready` existente.
-6. Confirmar Blob, Asset, UploadSession e job em uma transação, exigindo lease válido. Uma publicação física anterior ao commit pode ser verificada e reaproveitada no retry.
+6. Confirmar Blob, Asset, UploadSession e job em uma transação, exigindo lease válido, e registrar imagem/job para JPEG/PNG/WebP caso ausentes. Uma publicação física anterior ao commit pode ser verificada e reaproveitada no retry. A decodificação de imagem ocorre depois, sem atrasar a confirmação do original.
 7. Remover montagem e tentativas terminais pela manutenção. Somente após todas as exclusões e sincronizações, liberar a reserva no banco.
 
 Não há três cópias completas simultâneas no fluxo planejado: os chunks saem antes da cópia de publicação do Blob. As tentativas antigas são limpas antes de criar nova montagem. Locks de arquivo impedem limpeza de escritor ativo; no Linux o adaptador acrescenta `flock` às restrições de compartilhamento.
@@ -113,7 +113,7 @@ Erros de integridade/caminho/conteúdo ausente terminam como falha. Falhas trans
 
 ## Capacidade e opções
 
-Para tamanho declarado `N`, a sessão reserva `2 × N`. A admissão é serializada no PostgreSQL. Ela exige que **reservas existentes + temporários físicos + nova reserva** caibam no orçamento de temporários/reservas. Também exige espaço livre real para **margem mínima + reservas existentes + nova reserva**. A contagem é conservadora e pode recusar uma sessão mesmo havendo espaço imediato; ela protege a montagem/publicação e não promete dois arquivos máximos simultâneos.
+Para tamanho declarado `N`, a sessão reserva `2 × N`. A admissão é serializada no PostgreSQL. Ela exige que **reservas existentes de uploads/imagens + temporários físicos + nova reserva** caibam no orçamento de temporários/reservas. Também exige espaço livre real para **margem mínima + reservas existentes + nova reserva**. Imagens reservam duas vezes o limite de cada derivado antes do processamento e só liberam após limpeza terminal. A contagem é conservadora e pode recusar uma sessão mesmo havendo espaço imediato; ela protege a montagem/publicação e não promete dois arquivos máximos simultâneos.
 
 As opções abaixo pertencem à seção `Uploads`, compartilhada entre API e Worker, e são validadas na inicialização:
 
@@ -134,7 +134,7 @@ As opções abaixo pertencem à seção `Uploads`, compartilhada entre API e Wor
 
 Use hierarquia de configuração nativa, por exemplo `NEXORA_Uploads__ChunkSizeBytes` ou `NEXORA_Uploads__InactivityExpiration=7.00:00:00`. Chunks permitem até 64 MiB e no máximo 65.536 índices por arquivo. Durações devem ser positivas e de até 365 dias; timers de recepção, lease, renovação, processamento, polling e manutenção permitem até 30 dias. Renovação deve ocorrer antes de metade do lease; a graça de órfãos deve exceder processamento + recepção + lease. Opções inválidas recusam a inicialização.
 
-`GET /api/storage` retorna `activeLibraryBytes` e `trashBytes` lógicos da conta; `blobBytes`, `derivativeBytes`, `temporaryBytes` físicos; `reservedBytes` global; `totalBytes` e `availableBytes` do volume. Essas métricas têm significados diferentes e podem se sobrepor: não some reserva e bytes como consumo definitivo. O snapshot reúne consultas e inventário de disco, sem atomicidade entre ambos. A referência de aproximadamente 500 GB não é uma quota fixa. Derivados começarão a ser produzidos na Fase 5; a métrica já contempla seus diretórios.
+`GET /api/storage` retorna `activeLibraryBytes` e `trashBytes` lógicos da conta; `blobBytes`, `derivativeBytes`, `temporaryBytes` físicos; `reservedBytes` global, incluindo uploads/imagens; `totalBytes` e `availableBytes` do volume. Essas métricas têm significados diferentes e podem se sobrepor: não some reserva e bytes como consumo definitivo. O snapshot reúne consultas e inventário de disco, sem atomicidade entre ambos. A referência de aproximadamente 500 GB não é uma quota fixa. O consumo de derivados inclui PNGs e suas publicações intermediárias nos respectivos diretórios.
 
 ## Execução, verificação e pendências
 
@@ -142,4 +142,4 @@ As migrations são sempre explícitas. A migration `20261008112515_UploadsDurabl
 
 Um fluxo de verificação usa login, criação, envio fora de ordem, consulta/retomada, conclusão `202`, polling, listagem e download/Range; um reenvio igual retorna o mesmo Asset. Testes também exercitam concorrência, cancelamento, leases expirados, falhas entre filesystem/banco, limpeza antes da liberação de reserva e isolamento por proprietário. O resultado da execução da entrega está em [status-and-roadmap.md](status-and-roadmap.md).
 
-A validação local usa Windows e PostgreSQL nativo. Execução nativa no Arch, reinício real de serviços/servidor, queda de energia, systemd, Tailscale e restauração de backup permanecem pendentes na Fase 7. Falhas injetadas e recuperação de lease verificam as transições do software, mas não comprovam durabilidade física do volume de produção. Jobs de imagem e coleta de Blobs sem referências ainda não estão implementados.
+A validação local usa Windows e PostgreSQL nativo. Execução nativa no Arch, reinício real de serviços/servidor, queda de energia, systemd, Tailscale e restauração de backup permanecem pendentes na Fase 7. Falhas injetadas e recuperação de lease verificam as transições do software, mas não comprovam durabilidade física do volume de produção. Jobs de imagem estão descritos em [images.md](images.md); coleta de Blobs sem referências permanece para a Fase 6.
