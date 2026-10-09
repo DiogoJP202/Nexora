@@ -1,6 +1,6 @@
 # Validação local da Fase 8
 
-Verificado em **9 de outubro de 2026**, no Windows. O incremento inclui o cliente Android inicial e a sincronização durável. **Aceite real Android e operação no Arch continuam pendentes.** Não havia dispositivo conectado nem emulador disponível; nenhuma tela ou instalação foi verificada em execução Android.
+Verificado em **9 de outubro de 2026**, no Windows, código `089c593`. O incremento inclui o cliente Android inicial e a sincronização durável. **Aceite real Android e operação no Arch continuam pendentes.** Não havia dispositivo conectado nem emulador disponível; nenhuma tela ou instalação foi verificada em execução Android.
 
 ## Evidências executadas
 

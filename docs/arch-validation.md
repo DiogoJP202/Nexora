@@ -1,6 +1,6 @@
 # Nexora — validação operacional da Fase 7
 
-Atualizado em 8 de outubro de 2026. Código de referência da preparação: `fb7d9b6`. **A Fase 7 permanece em preparação.** Nenhum servidor Arch foi acessado, instalado ou restaurado durante este incremento. Os comandos deste documento são um roteiro a executar com dados de teste antes do uso pessoal em produção.
+Atualizado em 9 de outubro de 2026. Código de referência da preparação: `fb7d9b6`; pacote com sincronização da Fase 8: `089c593`. **A Fase 7 permanece em preparação.** Nenhum servidor Arch foi acessado, instalado ou restaurado durante estes incrementos. Os comandos deste documento são um roteiro a executar com dados de teste antes do uso pessoal em produção.
 
 ## Evidências locais
 
@@ -12,6 +12,8 @@ Atualizado em 8 de outubro de 2026. Código de referência da preparação: `fb7
 - Release limpa `phase7-linux-x64-20261008`, gerada por `Publish-ArchRelease.ps1` a partir de `fb7d9b6`, com `sourceDirty=false`. SHA-256 do manifesto: `a655352b7580021dc0c9ce1853dad43b6ca82d746579a6b12dc54d17aacb677f`. Configuração local sintética foi excluída durante a publicação.
 - Conferência independente por `common.sh`: cobertura completa do manifesto e hashes dos 723 arquivos aprovados.
 - Os pacotes ficam em `artifacts/arch/<release-id>`, ignorados pelo Git. Releases de produção exigem commit limpo, `sourceDirty=false` e hash do manifesto obtido na origem. A opção `-AllowDirty` produz somente pacotes de verificação, recusados pelo instalador.
+
+Em 9 de outubro, o incremento mobile gerou a release **`phase8-linux-x64-20261009`** a partir de `089c593597cc62bbb4560e1139a7ea50d6d07ded`, com `sourceDirty=false`. Ela inclui as duas migrations novas, última `20261008184113_ClientUploadRequests`, API/Worker/bundle Linux x64 com runtime 10.0.12 e a rotação de época no restore isolado. SHA-256 do manifesto: `17d8e6def9b7c0a082acd16f0fecf28feacee02682a8cc50b13cea4fac5501cd`. A conferência independente por `common.sh` validou os 723 arquivos. Use essa release, ou uma publicação posterior equivalente, para o protocolo do cliente Android; o pacote histórico da Fase 7 não inclui sync. A solução teve 274 testes locais aprovados, conforme [mobile-validation.md](mobile-validation.md); não houve execução Linux.
 
 Publicação cruzada confere o formato e o conteúdo do pacote. A execução de código nativo, unidades systemd, permissões Linux e recuperação após reinício dependem das verificações abaixo.
 
