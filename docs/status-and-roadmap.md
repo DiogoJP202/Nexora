@@ -1,6 +1,6 @@
 # Nexora — estado atual e próximas etapas
 
-Atualizado em **9 de outubro de 2026**. Código de referência da Fase 6: `e27ca91`; preparação da Fase 7: `fb7d9b6`; incremento Android/sincronização da Fase 8: `089c593`. As fases 1 a 6 foram verificadas localmente no Windows com PostgreSQL nativo. A Fase 8 acrescenta o primeiro cliente Android; a operação no Arch e o aceite no dispositivo continuam pendentes.
+Atualizado em **9 de outubro de 2026**. Código de referência da Fase 6: `e27ca91`; preparação da Fase 7: `fb7d9b6`; incremento Android/sincronização da Fase 8: `089c593`; envio fora da tela: `451925b`. As fases 1 a 6 foram verificadas localmente no Windows com PostgreSQL nativo. A operação no Arch e o aceite no dispositivo continuam pendentes.
 
 O Nexora já tem fundação, autenticação, armazenamento com deduplicação, arquivos/imagens por API e biblioteca com timeline, favoritos, renomeação, lixeira, restauração e coleta segura. A Fase 7 tem ferramentas Linux e procedimentos disponíveis, com execução no Arch e restauração real pendentes. Na Fase 8, o cliente Android usa registro durável de mudanças, cache de metadados e fila de uploads com retomada explícita. O incremento `0.1.1` permite continuar envios iniciados pelo usuário fora da tela, com serviço Android e notificação de pausa; seu aceite no aparelho permanece pendente.
 
@@ -205,6 +205,7 @@ Os contratos e códigos de erro estão em [authentication.md](authentication.md)
 | Biblioteca, timeline e lixeira | Commit `e27ca91`; migration `20261008125535_LibraryTrashAndPurge` aplicada ao banco local de desenvolvimento. |
 | Validação da Fase 6, em 8 de outubro de 2026 | Restore travado; build Release com zero avisos/erros; 229 testes aprovados: 60 unitários e 169 de integração, zero falhas e zero ignorados. |
 | Incremento Android da Fase 8, em 9 de outubro de 2026 | Commit `089c593`; 274 testes aprovados, migrations aplicadas, API iniciada e APK Debug gerado/inspecionado. Pacote Linux atualizado com manifesto conferido. Aceite no dispositivo e operação Arch pendentes; evidências em [mobile-validation.md](mobile-validation.md) e [arch-validation.md](arch-validation.md). |
+| Envios Android fora da tela, em 9 de outubro de 2026 | Commit `451925b`; 293 testes aprovados, APK `0.1.1`/código `2` com zero avisos/erros, assinatura v2/v3 e manifest `dataSync` não exportado conferidos. Pausa, retomada, escopo concorrente e deadline testados no núcleo; ciclo de vida real Android pendente. |
 
 Os resultados das fases 3 a 6 são do Windows com PostgreSQL nativo. Para verificar outra revisão, execute os comandos de [development.md](development.md) e registre o novo resultado.
 

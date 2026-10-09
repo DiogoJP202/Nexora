@@ -1,6 +1,6 @@
 # Validação local da Fase 8
 
-Verificado em **9 de outubro de 2026**, no Windows, incremento `0.1.1` de envio fora da tela. **Aceite real Android e operação no Arch continuam pendentes.** `adb devices -l` não encontrou dispositivo; não havia emulador disponível. Nenhuma instalação, tela ou notificação foi verificada em execução Android.
+Verificado em **9 de outubro de 2026**, no Windows, código `451925b`, incremento `0.1.1` de envio fora da tela. **Aceite real Android e operação no Arch continuam pendentes.** `adb devices -l` não encontrou dispositivo; não havia emulador disponível. Nenhuma instalação, tela ou notificação foi verificada em execução Android.
 
 ## Evidências executadas
 
