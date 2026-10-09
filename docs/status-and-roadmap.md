@@ -1,8 +1,8 @@
 # Nexora — estado atual e próximas etapas
 
-Atualizado em **8 de outubro de 2026**. Código de referência da Fase 6: `e27ca91`; preparação da Fase 7: `fb7d9b6`. As fases 1 a 6 foram verificadas localmente no Windows com PostgreSQL nativo; a operação no Arch continua pendente.
+Atualizado em **9 de outubro de 2026**. Código de referência da Fase 6: `e27ca91`; preparação da Fase 7: `fb7d9b6`. As fases 1 a 6 foram verificadas localmente no Windows com PostgreSQL nativo. A Fase 8 acrescenta o primeiro cliente Android; a operação no Arch e o aceite no dispositivo continuam pendentes.
 
-O Nexora já tem fundação, autenticação, armazenamento com deduplicação, arquivos/imagens por API e biblioteca com timeline, favoritos, renomeação, lixeira, restauração e coleta segura. A Fase 7 está em preparação: ferramentas Linux e procedimentos de operação disponíveis, com execução no Arch e restauração real pendentes. Clientes dependem das fases seguintes.
+O Nexora já tem fundação, autenticação, armazenamento com deduplicação, arquivos/imagens por API e biblioteca com timeline, favoritos, renomeação, lixeira, restauração e coleta segura. A Fase 7 tem ferramentas Linux e procedimentos disponíveis, com execução no Arch e restauração real pendentes. Na Fase 8, o cliente Android usa registro durável de mudanças, cache de metadados e fila de uploads com retomada explícita.
 
 ## 1. O que o projeto pretende ser
 
@@ -10,7 +10,7 @@ Uma nuvem pessoal hospedada por você, para guardar e acessar fotos, vídeos e a
 
 O destino de produção será Arch Linux, com PostgreSQL local, armazenamento em disco, API e Worker executados por systemd e acesso privado por Tailscale com HTTPS. Os aproximadamente 500 GB serão uma referência de planejamento; a admissão de arquivos dependerá do espaço livre real.
 
-O desenvolvimento começa pela API. O cliente mobile virá depois, inicialmente em MAUI para Android, com iOS posteriormente. A interface web também é uma evolução futura, sem fase de implementação definida neste roadmap.
+O desenvolvimento começou pela API e agora inclui um cliente MAUI Android. iOS e interface web continuam futuros, sem data definida neste roadmap.
 
 ### Decisões já tomadas
 
@@ -37,7 +37,7 @@ Os detalhes técnicos e as razões dessas decisões estão em [architecture.md](
 | 5 — Imagens | Concluída localmente | Metadados, orientação, thumbnails/previews PNG e processamento com limites. |
 | 6 — Biblioteca | Concluída localmente | Timeline, favoritos, renomeação, lixeira, restauração e limpeza definitiva segura. |
 | 7 — Operação | Em preparação | Publicação Linux, scripts e guias disponíveis; instalação, HTTPS e restauração real no Arch pendentes. |
-| 8 — Mobile futuro | Pendente | Contrato de sincronização e cliente MAUI Android; iOS depois. |
+| 8 — Mobile | Implementação inicial | Journal/sincronização, núcleo testável e app MAUI Android; aceite no dispositivo e iOS pendentes. |
 
 Não há estimativas de datas ou percentual de conclusão. As fases têm tamanhos diferentes; o avanço será registrado pelas entregas verificadas.
 
@@ -136,6 +136,25 @@ Os [contratos de armazenamento](storage.md) detalham essa fundação. A Fase 4 a
 
 **Aceite verificado localmente:** restore travado, build Release sem avisos/erros e 229 testes aprovados (60 unitários, 169 de integração), sem falhas/ignorados. Testes incluem duas contas, payloads inválidos, captura/fallback e EXIF tardio, paginação, retenção exata, corridas com locks PostgreSQL reais, exclusão interrompida, nova geração de reupload, processamento com lease expirado e cancelamento por perda da conexão do guard. Migration aplicada ao banco local de desenvolvimento. API e Worker iniciaram pela CLI; live/readiness retornaram 200, OpenAPI documentou edição/filtros/lixeira e rotas privadas retornaram 401 sem autenticação. Contratos e limites estão em [library.md](library.md); reinícios reais, restauração e filesystem nativo no Arch permanecem na Fase 7. Paginação limita uploads/processamento novos, mas favoritos/exclusões/restaurações refletem mudanças atuais.
 
+### Fase 8 — Sincronização e primeiro cliente Android
+
+- [x] Journal transacional por proprietário, com sequência em ordem de commit, projeções completas e tombstones de purge.
+- [x] Snapshot paginado congelado e feed incremental autenticado; cursores vinculados a proprietário, propósito e época do banco.
+- [x] Backfill dos Assets existentes e migration `20261008183547_DurableAssetSync`.
+- [x] UUID opcional `clientRequestId` na criação de upload, unicidade por conta, conflito de conteúdo e recuperação da resposta perdida; migration `20261008184113_ClientUploadRequests`.
+- [x] `Nexora.Mobile.Core` independente do Android: cliente HTTPS, refresh serializado, cache atômico e fila persistente com cópia/hash privados.
+- [x] `Nexora.Mobile` MAUI Android: login, armazenamento seguro, filtros/busca, favoritos/lixeira, detalhe, PNG e original por ação explícita.
+- [x] Fila manual de upload, progresso, pausa e retomada a partir dos chunks confirmados no servidor.
+- [x] Solução Android separada e script de build que utiliza Android SDK/JDK existentes, sem exigir esses workloads no build do backend.
+- [x] Rotação de época após restauração isolada para invalidar cursores de uma história anterior.
+- [ ] Executar o [roteiro de aceite Android](mobile.md) em dispositivo/emulador, incluindo layout, reinstalação, revogação, offline e encerramento do processo durante upload.
+- [ ] Projetar execução em background/integração com galeria em um incremento posterior.
+- [ ] Evoluir para iOS e assinatura/distribuição de produção posteriormente.
+
+O app opera em primeiro plano e mantém metadados e conteúdo baixado no diretório privado. Não agenda sincronização da galeria nem uploads em background. O journal não tem compactação automática nesta entrega. [mobile.md](mobile.md) e [synchronization.md](synchronization.md) registram os contratos e limites.
+
+**Validação local em 9 de outubro de 2026:** restore travado, 274 testes aprovados (60 unitários, 181 de integração, 33 mobile), sem falhas/ignorados. Migrations novas aplicadas ao banco de desenvolvimento, API/health/OpenAPI verificados e APK Debug assinado gerado com zero avisos/erros. O pacote inclui app/núcleo em ARM64/x64, API mínima 24 e target 36; assinatura e manifest foram inspecionados. [mobile-validation.md](mobile-validation.md) registra comandos, tamanho/hash do APK e limites da evidência. Nenhum dispositivo/emulador estava disponível para o aceite Android.
+
 ### Superfície HTTP disponível
 
 | Método | Rota | Finalidade |
@@ -163,6 +182,8 @@ Os [contratos de armazenamento](storage.md) detalham essa fundação. A Fase 4 a
 | `GET`, `HEAD` | `/api/assets/{id}/thumbnail` | Servir thumbnail PNG pronto e autorizado, com Range/ETag. |
 | `GET`, `HEAD` | `/api/assets/{id}/preview` | Servir preview PNG pronto e autorizado, com Range/ETag. |
 | `GET` | `/api/storage` | Consultar tamanhos lógicos, consumo físico, reservas e volume. |
+| `GET` | `/api/sync` | Obter snapshot paginado consistente da conta, incluindo lixeira. |
+| `GET` | `/api/sync/changes` | Receber alterações e tombstones após um cursor protegido. |
 
 Os contratos e códigos de erro estão em [authentication.md](authentication.md), [uploads.md](uploads.md), [images.md](images.md) e [library.md](library.md).
 
@@ -180,6 +201,7 @@ Os contratos e códigos de erro estão em [authentication.md](authentication.md)
 | Validação da Fase 5, em 8 de outubro de 2026 | Restore em locked mode; build Release com zero avisos/erros; 189 testes aprovados: 50 unitários e 139 de integração, zero falhas e zero ignorados; API/Worker e health checks verificados pela CLI. |
 | Biblioteca, timeline e lixeira | Commit `e27ca91`; migration `20261008125535_LibraryTrashAndPurge` aplicada ao banco local de desenvolvimento. |
 | Validação da Fase 6, em 8 de outubro de 2026 | Restore travado; build Release com zero avisos/erros; 229 testes aprovados: 60 unitários e 169 de integração, zero falhas e zero ignorados. |
+| Incremento Android da Fase 8, em 9 de outubro de 2026 | 274 testes aprovados, migrations aplicadas, API iniciada e APK Debug gerado/inspecionado. Aceite no dispositivo e operação Arch pendentes; evidência em [mobile-validation.md](mobile-validation.md). |
 
 Os resultados das fases 3 a 6 são do Windows com PostgreSQL nativo. Para verificar outra revisão, execute os comandos de [development.md](development.md) e registre o novo resultado.
 
@@ -212,13 +234,15 @@ O [registro de validação](arch-validation.md) separa publicação/testes no Wi
 
 ### Fase 8 — Cliente mobile e sincronização
 
-Depende de uma API estável e da operação do backend.
+O incremento Android foi implementado antes do aceite real da operação no Arch, conforme autorizado. A utilização com dados pessoais em produção continua dependendo da Fase 7.
 
-- [ ] Definir contrato de sincronização e registro de mudanças, incluindo exclusões e retomada.
-- [ ] Criar `apps/Nexora.Mobile` em MAUI, começando por Android.
-- [ ] Implementar login, armazenamento seguro de tokens, refresh serializado e identificação da instalação.
-- [ ] Implementar consulta de biblioteca, derivados e upload retomável usando os contratos da API.
-- [ ] Definir e testar comportamento offline e restrições de sincronização em background no Android.
+- [x] Definir contrato de sincronização e registro de mudanças, incluindo exclusões e retomada.
+- [x] Criar `apps/Nexora.Mobile` em MAUI, começando por Android.
+- [x] Implementar login, armazenamento seguro de tokens, refresh serializado e identificação da instalação.
+- [x] Implementar consulta de biblioteca, derivados e upload retomável usando os contratos da API.
+- [x] Implementar cache offline e retomada manual com testes do núcleo independente da plataforma.
+- [ ] Verificar os fluxos e comportamento offline no dispositivo Android, conforme roteiro de aceite.
+- [ ] Projetar e testar sincronização em background com as restrições Android em fase posterior.
 - [ ] Evoluir para iOS posteriormente, considerando as restrições específicas da plataforma.
 
 **Aceite inicial:** um dispositivo Android autentica, consulta a biblioteca e envia arquivos com retomada; trata revogação e necessidade de novo login; sincronização não cria duplicatas nem perde exclusões. O aceite de iOS será definido quando essa etapa começar.

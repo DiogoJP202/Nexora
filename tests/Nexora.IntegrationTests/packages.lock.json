@@ -534,6 +534,9 @@
           "SkiaSharp.NativeAssets.Linux.NoDependencies": "[4.153.1, )"
         }
       },
+      "nexora.mobile.core": {
+        "type": "Project"
+      },
       "nexora.worker": {
         "type": "Project",
         "dependencies": {

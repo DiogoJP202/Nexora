@@ -33,6 +33,8 @@ internal sealed class UploadSessionConfiguration : IEntityTypeConfiguration<Uplo
             .HasPrincipalKey(device => new { device.UserId, device.Id }).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(upload => upload.ResultAsset).WithMany().HasForeignKey(upload => upload.ResultAssetId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(upload => new { upload.OwnerId, upload.State });
+        builder.HasIndex(upload => new { upload.OwnerId, upload.ClientRequestId }).IsUnique()
+            .HasFilter("\"ClientRequestId\" IS NOT NULL");
         builder.HasIndex(upload => new { upload.State, upload.LastActivityAt });
         builder.HasIndex(upload => upload.AssemblyTemporaryId).IsUnique();
     }

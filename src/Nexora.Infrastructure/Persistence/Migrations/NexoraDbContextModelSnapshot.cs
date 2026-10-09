@@ -339,6 +339,61 @@ namespace Nexora.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Nexora.Domain.Content.AssetSyncEntry", b =>
+                {
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("Sequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
+                    b.Property<string>("Payload")
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("OwnerId", "Sequence");
+
+                    b.HasIndex("OwnerId", "AssetId", "Sequence")
+                        .IsDescending(false, false, true);
+
+                    b.ToTable("AssetSyncEntries", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AssetSyncEntries_Payload", "(\"Kind\" = 'upsert' AND \"Payload\" IS NOT NULL) OR (\"Kind\" = 'purge' AND \"Payload\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_AssetSyncEntries_Sequence", "\"Sequence\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Nexora.Domain.Content.AssetSyncState", b =>
+                {
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Epoch")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<long>("Sequence")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.HasKey("OwnerId");
+
+                    b.ToTable("AssetSyncStates", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AssetSyncStates_Sequence", "\"Sequence\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("Nexora.Domain.Content.Blob", b =>
                 {
                     b.Property<Guid>("Id")
@@ -605,6 +660,9 @@ namespace Nexora.Infrastructure.Persistence.Migrations
                     b.Property<int>("ChunkSize")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("ClientRequestId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -654,6 +712,10 @@ namespace Nexora.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.HasIndex("ResultAssetId");
+
+                    b.HasIndex("OwnerId", "ClientRequestId")
+                        .IsUnique()
+                        .HasFilter("\"ClientRequestId\" IS NOT NULL");
 
                     b.HasIndex("OwnerId", "DeviceId");
 
@@ -907,6 +969,24 @@ namespace Nexora.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Blob");
+                });
+
+            modelBuilder.Entity("Nexora.Domain.Content.AssetSyncEntry", b =>
+                {
+                    b.HasOne("Nexora.Domain.Content.AssetSyncState", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Nexora.Domain.Content.AssetSyncState", b =>
+                {
+                    b.HasOne("Nexora.Infrastructure.Identity.NexoraUser", null)
+                        .WithOne()
+                        .HasForeignKey("Nexora.Domain.Content.AssetSyncState", "OwnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Nexora.Domain.Images.BlobImage", b =>

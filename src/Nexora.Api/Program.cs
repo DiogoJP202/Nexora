@@ -143,6 +143,7 @@ app.MapAuthenticationEndpoints();
 app.MapDeviceEndpoints();
 app.MapUploadEndpoints();
 app.MapAssetEndpoints();
+app.MapSyncEndpoints();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi().AllowAnonymous();

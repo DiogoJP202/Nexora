@@ -26,11 +26,16 @@ O corpo de criação é JSON, com tamanho em bytes e SHA-256 opcional:
 {
   "originalName": "arquivo.txt",
   "expectedLength": 12,
-  "expectedSha256": null
+  "expectedSha256": null,
+  "clientRequestId": "ec5ad33b-ce94-42f8-9dd0-57879ad6193a"
 }
 ```
 
 O servidor valida o nome, determina `chunkSize` e `chunkCount` e retorna `UploadSnapshot`: `id`, `originalName`, `expectedLength`, `chunkSize`, `chunkCount`, `state`, `confirmedChunks`, `createdAt`, `lastActivityAt`, `result`, `failureCode` e `operation`. `operation`, quando existe, contém `id`, `state`, `attempts` e `failureCode`. Timestamps operacionais são UTC. Consultar progresso não renova a atividade de uma sessão aberta; a confirmação de chunk a renova.
+
+A Fase 8 acrescenta `clientRequestId`, UUID opcional e diferente de zero, persistido pelo cliente antes do primeiro POST. A combinação conta/UUID identifica a criação: repetir com o mesmo nome, tamanho e hash esperado retorna `201` com a mesma sessão, `Location`, operação ou estado terminal, sem outra reserva. Repetir o UUID com conteúdo diferente retorna `409 upload_request_conflict`. A chave pertence à conta, permitindo recuperação por outro dispositivo autorizado; não representa identidade global de conteúdo. Clientes anteriores podem omitir o campo e continuam criando uma nova sessão a cada POST. O SHA-256 final calculado pelo Worker e a deduplicação Blob/Asset permanecem responsáveis pela identidade dos bytes.
+
+Não reutilize o UUID para iniciar outro envio após cancelamento, expiração ou falha. A repetição preserva o resultado terminal. A fila Android utiliza essa chave para recuperar respostas perdidas e reconciliar sessões ausentes após restauração, conforme [mobile.md](mobile.md).
 
 Os estados atualmente usam a serialização numérica padrão do ASP.NET Core:
 
@@ -66,6 +71,7 @@ Cancelar uma sessão `Open` ou `Finalizing` invalida a conclusão pelo Worker. O
 | Situação | Status/código principal |
 | --- | --- |
 | Nome, tamanho ou hash esperado inválido | `400`, `invalid_request` |
+| UUID de criação reutilizado com outro nome/tamanho/hash | `409`, `upload_request_conflict` |
 | Arquivo acima do máximo | `413`, `file_too_large` |
 | Teto de sessões abertas/finalizando atingido | `409`, `upload_limit_reached` |
 | Reserva/orçamento/espaço livre insuficiente | `507`, `insufficient_storage` |

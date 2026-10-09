@@ -151,8 +151,17 @@ public sealed class ProcessImageRenderer(IOptions<ImageOptions> configured) : II
     {
         while (!process.HasExited)
         {
-            process.Refresh();
-            if (process.WorkingSet64 > maximumMemory) throw new ImageProcessingException("image_memory_limit_exceeded");
+            try
+            {
+                process.Refresh();
+                if (process.WorkingSet64 > maximumMemory) throw new ImageProcessingException("image_memory_limit_exceeded");
+            }
+            catch (InvalidOperationException) when (process.HasExited)
+            {
+                // The child can exit after HasExited but before its memory is read.
+                // Continue to its exit status and bounded protocol response.
+                break;
+            }
             await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken);
         }
         await process.WaitForExitAsync(cancellationToken);

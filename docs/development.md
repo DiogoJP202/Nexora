@@ -1,6 +1,6 @@
 # Desenvolvimento local
 
-Execute os comandos deste guia na raiz do repositório. As fases 1 a 6 entregam fundação, autenticação, arquivos/imagens por API e biblioteca com timeline, favoritos e lixeira. API e Worker são processos separados que compartilham PostgreSQL e a raiz de storage.
+Execute os comandos deste guia na raiz do repositório. As fases 1 a 6 entregam fundação, autenticação, arquivos/imagens por API e biblioteca com timeline, favoritos e lixeira; a Fase 8 acrescenta sincronização e cliente Android. API e Worker são processos separados que compartilham PostgreSQL e a raiz de storage.
 
 ## SDK e dependências
 
@@ -14,6 +14,8 @@ dotnet build Nexora.sln
 ```
 
 Para reproduzir exatamente as dependências já registradas, use `dotnet restore Nexora.sln --locked-mode`. Atualizações de dependências exigem revisão das versões e dos arquivos de lock.
+
+`Nexora.sln` inclui `Nexora.Mobile.Core` e `Nexora.Mobile.Tests`, ambos `net10.0` sem dependência de Android. O app está em `apps/Nexora.Mobile.sln` e usa MAUI 10.0.110, SDK Android 36 e JDK 21. `pwsh -File scripts/Build-Android.ps1` gera um APK Debug instalável com assemblies incluídos; o script usa os SDKs já instalados e não configura dispositivos. Consulte [mobile.md](mobile.md) para instalação, HTTPS privado e verificações no Android.
 
 A Fase 5 usa SkiaSharp 4.153.1, seu pacote `SkiaSharp.NativeAssets.Linux.NoDependencies` e MetadataExtractor 2.9.3. O restore inclui dependências nativas; sua presença não substitui a validação no Arch. A API não decodifica imagens durante downloads; o Worker usa processo filho do próprio executável para a decodificação. Consulte [images.md](images.md) para limites e requisitos.
 

@@ -8,9 +8,9 @@ public sealed class UploadSession
     private UploadSession() { }
 
     public UploadSession(Guid id, Guid ownerId, Guid deviceId, string originalName, long expectedLength,
-        string? expectedSha256, int chunkSize, DateTimeOffset createdAt)
+        string? expectedSha256, int chunkSize, DateTimeOffset createdAt, Guid? clientRequestId = null)
     {
-        if (id == Guid.Empty || ownerId == Guid.Empty || deviceId == Guid.Empty)
+        if (id == Guid.Empty || ownerId == Guid.Empty || deviceId == Guid.Empty || clientRequestId == Guid.Empty)
             throw new ArgumentException("An upload requires valid identifiers.");
         Asset.ValidateOriginalName(originalName);
         ArgumentOutOfRangeException.ThrowIfNegative(expectedLength);
@@ -25,6 +25,7 @@ public sealed class UploadSession
         Id = id;
         OwnerId = ownerId;
         DeviceId = deviceId;
+        ClientRequestId = clientRequestId;
         OriginalName = originalName;
         ExpectedLength = expectedLength;
         ExpectedSha256 = expectedSha256;
@@ -38,6 +39,7 @@ public sealed class UploadSession
     public Guid Id { get; private set; }
     public Guid OwnerId { get; private set; }
     public Guid DeviceId { get; private set; }
+    public Guid? ClientRequestId { get; private set; }
     public string OriginalName { get; private set; } = string.Empty;
     public long ExpectedLength { get; private set; }
     public string? ExpectedSha256 { get; private set; }

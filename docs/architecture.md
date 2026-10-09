@@ -1,6 +1,6 @@
 # Arquitetura do Nexora
 
-Nexora é uma nuvem privada para fotos, vídeos e arquivos pessoais, executada em um único servidor Arch Linux com aproximadamente 500 GB disponíveis. O MVP terá uma conta administrativa, acesso privado por Tailscale e uma API ASP.NET Core. O cliente mobile será uma etapa posterior.
+Nexora é uma nuvem privada para fotos, vídeos e arquivos pessoais, destinada a um único servidor Arch Linux com aproximadamente 500 GB disponíveis. O MVP tem uma conta administrativa, acesso privado por Tailscale e uma API ASP.NET Core. A Fase 8 acrescenta o primeiro cliente MAUI Android.
 
 Este documento registra o desenho aprovado e sua implementação incremental. As fases 1 a 6 entregam fundação, autenticação, conteúdo imutável, uploads retomáveis, downloads, imagens e biblioteca com timeline, favoritos e lixeira. A base foi validada localmente no Windows. A Fase 7 já prepara publicação Linux, systemd e procedimentos operacionais; o aceite de produção depende da execução e da restauração real no Arch.
 
@@ -19,7 +19,7 @@ Consulte [estado e próximas etapas](status-and-roadmap.md) para o inventário d
 
 ## Separação de responsabilidades
 
-A árvore abaixo é a estrutura alvo. Os quatro projetos centrais, Worker e os dois projetos de testes já existem; o cliente mobile entra na Fase 8.
+A árvore abaixo é a estrutura atual. `Nexora.sln` inclui backend, núcleo mobile e testes portáveis. `apps/Nexora.Mobile.sln` acrescenta o app Android, que exige workloads próprios.
 
 ```text
 Nexora.sln
@@ -33,7 +33,10 @@ tests/
   Nexora.UnitTests
   Nexora.IntegrationTests
 apps/
+  Nexora.Mobile.sln
   Nexora.Mobile
+  Nexora.Mobile.Core
+  Nexora.Mobile.Tests
 ```
 
 `Domain` contém entidades e invariantes sem dependência de ASP.NET Core, EF Core ou filesystem. `Application` coordena casos de uso e define os contratos necessários. `Infrastructure` implementa persistência, storage e integrações. `Api` concentra HTTP, autenticação, validação de entrada e composição de dependências. `Worker` executa processamento e manutenção em background, compartilhando os mesmos casos de uso e infraestrutura.
@@ -55,6 +58,8 @@ Não introduzir repositório genérico, mediator, event bus ou camadas adicionai
 | UploadChunk | Índice, tamanho, SHA-256 e localização interna de um chunk confirmado. |
 | BackgroundJob | Trabalho durável de upload ou imagem, exatamente um alvo, tentativas, próxima execução e lease. |
 | BackgroundJobAttempt | UUID de tentativa persistido antes de criar montagem/publicação ou derivados. |
+| AssetSyncState | Época e último contador por proprietário, com lock mantido até o commit. |
+| AssetSyncEntry | Projeção imutável de um upsert ou tombstone, registrada pelo PostgreSQL na mesma transação da alteração. |
 
 Identity, Device, AuthSession e RefreshToken estão implementados na Fase 2. Blob e Asset foram introduzidos na Fase 3. A Fase 4 acrescentou uploads/jobs/tentativas. A Fase 5 introduz BlobImage e jobs `ProcessImage`, compartilhados por todos os Assets que apontam ao mesmo Blob.
 
@@ -82,7 +87,7 @@ Originais autenticados usam streaming, nomes de resposta tratados pelo framework
 
 ## Contratos HTTP atuais e previstos
 
-Os endpoints das fases 2, 4, 5 e 6 estão implementados. Recursos de usuário sempre exigem autenticação e autorização; login/refresh têm validação e limitação próprias.
+Os endpoints das fases 2, 4, 5, 6 e 8 estão implementados. Recursos de usuário sempre exigem autenticação e autorização; login/refresh têm validação e limitação próprias.
 
 | Fase | Contrato | Responsabilidade |
 | --- | --- | --- |
@@ -95,6 +100,7 @@ Os endpoints das fases 2, 4, 5 e 6 estão implementados. Recursos de usuário se
 | 5 | `GET`/`HEAD /api/assets/{id}/thumbnail`, `/api/assets/{id}/preview` | Servir PNGs autorizados, verificados por hash/tamanho, com Range/ETag. |
 | 6 | `PATCH /api/assets/{id}` | Renomear e/ou alterar favorito, preservando identidade e upload. |
 | 6 | `DELETE /api/assets/{id}`, `GET /api/trash`, `POST /api/trash/{id}/restore` | Soft delete, listagem da lixeira e restauração explícita. |
+| 8 | `GET /api/sync`, `GET /api/sync/changes` | Snapshot congelado e journal durável de alterações da própria conta. |
 
 Usar Problem Details para erros e DTOs sem caminhos físicos ou entidades EF expostas. A conclusão do upload retorna `202` durante processamento e `200` ao repetir uma conclusão terminal; consultar a sessão informa o resultado ou a falha. Downloads completos/parciais trabalham com Streams e respeitam Range válido, inclusive `206` e `416` quando aplicável. Os [contratos da Fase 4](uploads.md) descrevem índices, estados, erros, paginação e capacidade.
 
@@ -160,6 +166,14 @@ A falha do processamento não remove nem invalida um original publicado. Imagens
 Na Fase 6, soft delete altera `Asset.DeletedAt` e mantém o Blob. Lixeira conserva bytes e referências. Restauração e purge disputam locks de Blob/Asset; uma exclusão definitiva concluída não pode ser restaurada pela API.
 
 Após a retenção configurada, o Worker remove o Asset e destaca resultados de uploads concluídos com `ResultPurgedAt`, preservando sucesso/histórico. A coleta adquire o mesmo advisory de hash da criação de referências, protege contra processamento ativo de imagem, trava o Blob, verifica ausência de todos os Assets e confirma `Deleting`. Depois exclui e sincroniza originais, derivados e tentativas; somente então remove a linha/reservas. Erros mantêm a intenção para retry. Referências novas recusam Deleting; reuploads após coleta usam outro UUID físico. Intenções Staging são preservadas. Os contratos estão em [library.md](library.md).
+
+## Sincronização e cliente Android
+
+Triggers PostgreSQL registram projeções completas dos Assets e tombstones de purge na mesma transação das escritas, incluindo atualização compartilhada de imagem. Um contador por proprietário é incrementado sob lock até o commit: nenhuma transação posterior pode tornar uma sequência visível antes da anterior. O snapshot lê a última projeção de cada item até um watermark fixo; o feed posterior avança pelo journal, sem reconsultar o estado mutável para hidratar eventos antigos.
+
+Cursores Data Protection incluem proprietário, propósito e época. Restaurar um backup exige uma nova época antes de clientes reconectarem, porque números de sequência de histórias diferentes podem coincidir. O script de restauração isolada executa essa rotação, preservando compatibilidade com releases anteriores ao journal. A retenção inicial do journal é indefinida; compactação futura precisará invalidar/reconstruir cursores de forma explícita. Contratos em [synchronization.md](synchronization.md).
+
+O cliente MAUI usa HTTPS sem redirecionamentos, armazenamento seguro da plataforma para tokens e uma identificação de instalação por servidor/conta. Cache de metadados e fila de uploads ficam em arquivos privados separados dos tokens. Refresh é serializado e seu token persistido é removido antes da requisição para evitar replay após morte do processo. Uploads mantêm uma cópia local imutável com SHA-256 e UUID de criação persistido; retomadas consultam os chunks confirmados antes de enviar bytes faltantes. A operação é manual/em primeiro plano, com pausa e consulta da finalização; background e galeria são futuros. A validação real Android está registrada como pendente em [mobile.md](mobile.md).
 
 ## Segurança, operação e backup
 

@@ -213,5 +213,11 @@ pg psql --no-psqlrc --set=ON_ERROR_STOP=1 --tuples-only --no-align --dbname="$da
     --command 'SELECT "MigrationId" || chr(9) || "ProductVersion" FROM public."__EFMigrationsHistory" ORDER BY "MigrationId";' \
     > "$target_root/metadata/restored-migrations.txt" 2>> "$target_root/metadata/restore.log"
 cmp -s -- "$backup/migrations.txt" "$target_root/metadata/restored-migrations.txt" || nx_die 'restored EF migration history differs'
+# Restored counters may overlap cursors already saved by clients. Rotate each
+# owner's epoch before any client connects, forcing a fresh library snapshot.
+# Older releases without the sync tables remain valid rehearsal inputs.
+pg psql --no-psqlrc --set=ON_ERROR_STOP=1 --dbname="$database" \
+    --command 'SET ROLE nexora_restore; DO $$ BEGIN IF to_regclass('\''public."AssetSyncStates"'\'') IS NOT NULL THEN UPDATE public."AssetSyncStates" SET "Epoch" = gen_random_uuid(); END IF; END $$;' \
+    >/dev/null 2>> "$target_root/metadata/restore.log" || nx_die 'unable to rotate restored synchronization epochs'
 printf 'Isolated data restoration completed: %s\nDatabase: %s\n' "$target_root" "$database"
 printf '%s\n' 'Archived configuration is inert and root-only. Prepare a fresh isolated runtime configuration before manual validation.'

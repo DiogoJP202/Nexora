@@ -30,9 +30,8 @@ public sealed class PostgresUploadService(NexoraDbContext db, ITemporaryStorage 
     {
         ArgumentNullException.ThrowIfNull(request);
         var settings = options.Value;
-        if (ownerId == Guid.Empty || deviceId == Guid.Empty || request.ExpectedLength < 0)
+        if (ownerId == Guid.Empty || deviceId == Guid.Empty || request.ExpectedLength < 0 || request.ClientRequestId == Guid.Empty)
             throw Refuse(400, "invalid_request");
-        if (request.ExpectedLength > settings.MaximumFileSizeBytes) throw Refuse(413, "file_too_large");
         string? hash;
         try
         {
@@ -41,16 +40,35 @@ public sealed class PostgresUploadService(NexoraDbContext db, ITemporaryStorage 
         }
         catch (ArgumentException) { throw Refuse(400, "invalid_request"); }
         var now = clock.GetUtcNow();
-        var upload = new UploadSession(Guid.CreateVersion7(now), ownerId, deviceId, request.OriginalName,
-            request.ExpectedLength, hash, settings.ChunkSizeBytes, now);
         db.ChangeTracker.Clear();
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({CapacityLock})", cancellationToken);
-        await UploadTransactionLock.AcquireAsync(db, upload.Id, cancellationToken);
+        Guid? existingId = request.ClientRequestId is { } requestId
+            ? await db.UploadSessions.Where(item => item.OwnerId == ownerId && item.ClientRequestId == requestId)
+                .Select(item => (Guid?)item.Id).SingleOrDefaultAsync(cancellationToken)
+            : null;
+        var uploadId = existingId ?? Guid.CreateVersion7(now);
+        await UploadTransactionLock.AcquireAsync(db, uploadId, cancellationToken);
         var owner = await UserTransactionLock.AcquireAsync(db, ownerId, cancellationToken);
         if (owner is null || !await db.Devices.AsNoTracking().AnyAsync(device => device.Id == deviceId
             && device.UserId == ownerId && device.RevokedAt == null, cancellationToken))
             throw Refuse(400, "invalid_device");
+        if (existingId is not null)
+        {
+            var existing = await UploadTransactionLock.RowAsync(db, uploadId, cancellationToken)
+                ?? throw Refuse(409, "upload_request_conflict");
+            if (existing.OriginalName != request.OriginalName || existing.ExpectedLength != request.ExpectedLength
+                || existing.ExpectedSha256 != hash)
+                throw Refuse(409, "upload_request_conflict");
+            ExpireIfInactive(existing);
+            await db.SaveChangesAsync(cancellationToken);
+            var repeated = await SnapshotAsync(existing, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return repeated;
+        }
+        if (request.ExpectedLength > settings.MaximumFileSizeBytes) throw Refuse(413, "file_too_large");
+        var upload = new UploadSession(uploadId, ownerId, deviceId, request.OriginalName,
+            request.ExpectedLength, hash, settings.ChunkSizeBytes, now, request.ClientRequestId);
         var activeCount = await db.UploadSessions.CountAsync(item => item.OwnerId == ownerId
             && (item.State == UploadState.Open || item.State == UploadState.Finalizing), cancellationToken);
         if (activeCount >= settings.MaximumOpenUploadsPerOwner) throw Refuse(409, "upload_limit_reached");

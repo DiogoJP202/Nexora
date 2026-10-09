@@ -62,6 +62,7 @@ public static class DependencyInjection
         });
 
         services.TryAddSingleton(TimeProvider.System);
+        services.AddDataProtection();
         services.AddHttpContextAccessor();
         services.AddAuthentication(AuthenticationConstants.Scheme).AddBearerToken(AuthenticationConstants.Scheme);
         services.AddOptions<BearerTokenOptions>(AuthenticationConstants.Scheme).Configure<TimeProvider>((options, clock) =>
@@ -110,6 +111,7 @@ public static class DependencyInjection
         services.AddScoped<IAssetDerivatives, PostgresAssetDerivatives>();
         services.AddScoped<IAssetLibrary, PostgresAssetLibrary>();
         services.AddScoped<IAssetLifecycle, PostgresAssetLifecycle>();
+        services.AddScoped<IAssetSync, PostgresAssetSync>();
         services.AddScoped<IContentMaintenance, PostgresContentMaintenance>();
         services.AddScoped<IStorageStatusService, PostgresStorageStatusService>();
         services.AddSingleton<IStorageUsageReader, LocalStorageUsageReader>();

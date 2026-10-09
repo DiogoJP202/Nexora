@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <RuntimeIdentifiers>android-arm64;android-x64</RuntimeIdentifiers>
+    <RuntimeFrameworkVersion />
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Nexora.Mobile</RootNamespace>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+    <MauiVersion>10.0.110</MauiVersion>
+    <ApplicationTitle>Nexora</ApplicationTitle>
+    <ApplicationId>com.nexora.mobile</ApplicationId>
+    <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+    <SupportedOSPlatformVersion>24.0</SupportedOSPlatformVersion>
+    <AndroidPackageFormats>apk</AndroidPackageFormats>
+    <AndroidKeyStore>false</AndroidKeyStore>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <MauiIcon Include="Resources/AppIcon/appicon.svg" />
+    <MauiSplashScreen Include="Resources/Splash/splash.svg" Color="#0B1220" BaseSize="128,128" />
+    <MauiImage Include="Resources/Images/*" />
+    <PackageReference Include="Microsoft.Maui.Controls" />
+    <ProjectReference Include="../Nexora.Mobile.Core/Nexora.Mobile.Core.csproj" />
+  </ItemGroup>
+</Project>

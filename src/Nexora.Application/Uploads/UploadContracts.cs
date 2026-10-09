@@ -5,7 +5,8 @@ using Nexora.Domain.Jobs;
 
 namespace Nexora.Application.Uploads;
 
-public sealed record CreateUploadRequest(string OriginalName, long ExpectedLength, string? ExpectedSha256 = null);
+public sealed record CreateUploadRequest(string OriginalName, long ExpectedLength, string? ExpectedSha256 = null,
+    Guid? ClientRequestId = null);
 public sealed record UploadOperationSummary(Guid Id, BackgroundJobState State, int Attempts, string? FailureCode);
 public sealed record UploadSnapshot(Guid Id, string OriginalName, long ExpectedLength, int ChunkSize,
     int ChunkCount, UploadState State, int[] ConfirmedChunks, DateTimeOffset CreatedAt,

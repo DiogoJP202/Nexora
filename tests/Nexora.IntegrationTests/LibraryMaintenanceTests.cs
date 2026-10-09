@@ -483,7 +483,10 @@ public sealed class LibraryMaintenanceTests
             .MigrateAsync("20261008122015_ImageMetadataAndDerivatives"));
         Assert.Contains("restore a consistent backup", exception.MessageText);
         Assert.Contains("20261008125535_LibraryTrashAndPurge", await db.Database.GetAppliedMigrationsAsync());
-        Assert.NotNull((await db.UploadSessions.AsNoTracking().SingleAsync(item => item.Id == upload.Id)).ResultPurgedAt);
+        // Later migrations may already have been reverted before the library guard rejects.
+        // Inspect the surviving library-era column without materializing the newest schema.
+        Assert.NotNull(await db.UploadSessions.AsNoTracking().Where(item => item.Id == upload.Id)
+            .Select(item => item.ResultPurgedAt).SingleAsync());
     }
 
     [Theory]
