@@ -33,6 +33,8 @@ Não há evidência de instalação ou inspeção visual Android nesta entrega e
 
 ## Conexão e sessão
 
+Para testar com servidor Windows antes de preparar o Arch, siga [windows-mobile-test.md](windows-mobile-test.md): API/Worker locais, administrador, Tailscale e hostname permitido.
+
 Informe a URL raiz HTTPS do servidor privado e a conta administrativa já criada no backend. A URL não aceita credenciais embutidas, caminho, parâmetros ou fragmento. O app recusa tráfego HTTP e redirecionamentos; o certificado precisa ser confiável para Android. O acesso pela tailnet e Tailscale Serve depende da configuração de [arch-deployment.md](arch-deployment.md).
 
 O núcleo admite HTTP de desenvolvimento somente quando explicitamente habilitado, para loopback ou `10.0.2.2`; essa opção não é habilitada na interface Android e seu manifest bloqueia cleartext. Um endpoint HTTP local da API precisa de uma entrada HTTPS confiável para uso neste APK.

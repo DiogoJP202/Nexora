@@ -84,6 +84,7 @@ Testes unitários, HTTP/configuração e filesystem executam sem PostgreSQL. Tes
 - [Imagens e derivados](docs/images.md): metadados, estados, configuração, processo nativo, publicação e recuperação.
 - [Biblioteca e lixeira](docs/library.md): timeline, filtros, edição, restauração, retenção e coleta segura.
 - [Cliente Android](docs/mobile.md): APK, sessão segura, cache offline, uploads e aceite no dispositivo.
+- [Teste pelo Windows](docs/windows-mobile-test.md): conectar o celular ao servidor local por HTTPS privado, sem exigir Arch.
 - [Uploads fora da tela](docs/android-background-uploads.md): serviço Android, notificação/pausa, restrições e testes manuais pendentes.
 - [Validação mobile](docs/mobile-validation.md): testes locais, APK verificado e evidências que ainda dependem do dispositivo.
 - [Sincronização](docs/synchronization.md): snapshot, journal, cursores, exclusões e recuperação após backup.
