@@ -2,6 +2,8 @@
 
 Nuvem privada para fotos, vídeos e arquivos pessoais, construída com .NET 10, ASP.NET Core, EF Core e PostgreSQL 18. O destino de produção é um servidor Arch Linux, com systemd e acesso privado por Tailscale.
 
+**Continuar em outro PC/chat:** comece pelo [handoff completo](docs/handoff.md), que registra o estado verificado, o que fica fora do Git e um prompt para o próximo chat. O [setup do PC novo](docs/new-pc-setup.md) prepara o servidor Windows e o teste Android. Em 9 de outubro, a conexão pelo celular ficou pendente porque Tailscale não pode ser instalado neste PC; banco dev sem administrador/arquivos, HTTPS privado e aceite real Android ainda pendentes.
+
 ## Estado atual: cliente Android e envios fora da tela na Fase 8
 
 A API inclui autenticação com Identity, tokens opacos, sessões e revogação de dispositivos, além de configuração validada, PostgreSQL, migrations e health checks. Arquivos podem ser enviados em chunks retomáveis, finalizados pelo Worker, listados e baixados com HTTP Range. JPEG, PNG e WebP estáticos recebem metadados, orientação corrigida, thumbnail e preview autenticados. A biblioteca oferece timeline, filtros, favoritos, renomeação, lixeira e restauração. O Worker remove itens após a retenção e coleta somente Blobs sem referências. Blob/Asset mantêm armazenamento imutável, SHA-256 e deduplicação; falha de imagem preserva o original. A conta administrativa é criada somente por comando local.
@@ -75,6 +77,8 @@ Testes unitários, HTTP/configuração e filesystem executam sem PostgreSQL. Tes
 
 ## Documentação
 
+- [Continuidade em outro PC/chat](docs/handoff.md): estado técnico/local, evidências, artefatos, pendências e prompt de retomada.
+- [Preparar o PC novo](docs/new-pc-setup.md): reprovisionamento, preservação de dados, HTTPS e assinatura do APK.
 - [Estado e próximas etapas](docs/status-and-roadmap.md): objetivo do projeto, entregas concluídas, pendências por fase e critérios de aceite.
 - [Arquitetura e decisões](docs/architecture.md): modelo, uploads, segurança, recuperação e roadmap.
 - [Desenvolvimento](docs/development.md): configuração, PostgreSQL, migrations e validação local.

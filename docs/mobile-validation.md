@@ -27,12 +27,14 @@ Arquivo ignorado pelo Git: `apps/Nexora.Mobile/bin/Debug/net10.0-android/com.nex
 | Instalação manual | Assemblies de app/núcleo incluídos nos dois ABIs; build com `EmbedAssembliesIntoApk=true`. |
 | Assinatura | `apksigner verify --verbose` aprovado, esquemas v2/v3 e um signatário de desenvolvimento. |
 | Tamanho | 84.455.305 bytes. |
-| SHA-256 | `8c228dc51e9cfd320050ff6f2722119ff1a48b4c6d0652cf5b2d1eb4cf53d449`. |
+| SHA-256 do inventário de troca de PC | `d5d1bd7999d0a54efb31f769c059e582cfc33b4e4283a74dbbcc2e342a11ce39`. |
 | Manifest | Backup/cleartext desabilitados e regras de transferência incluídas; FileProvider e serviço não exportados. |
 | Serviço | Tipo `dataSync`, `stopWithTask=false`, permissões de foreground/dataSync/notificações. |
 | FileProvider | XML compilado contém somente `cache-path` com `nexora-sharing/`; biblioteca, fila e sessão não são raízes compartilhadas. |
 
 O APK é Debug, para ensaio por instalação manual. O hash identifica estes bytes, não futuras compilações; a assinatura de desenvolvimento e timestamps podem diferir em outro ambiente. Build e inspeção do pacote não comprovam layout, keystore, FilePicker, abertura externa ou comportamento do Android ao encerrar o processo.
+
+No novo inventário de 9 de outubro para [troca de PC](handoff.md), o arquivo no caminho acima foi conferido novamente: 84.455.305 bytes, versão `0.1.1`/código `2`, API 24/36, dois ABIs e assinatura v2/v3 válidos. Seu SHA-256 é o da tabela. O hash `8c228dc51e9cfd320050ff6f2722119ff1a48b4c6d0652cf5b2d1eb4cf53d449` era o registro anterior dessa versão e é evidência histórica, não do arquivo atual. O APK baixado no celular não teve o hash lido. Esta entrega de documentação não repetiu os 293 testes nem o build; preserva os resultados funcionais anteriores e distingue o inventário atual do artefato.
 
 O registro anterior (`089c593`, versão `0.1.0`, código `1`) tinha 274 testes e APK de 84.067.239 bytes, SHA-256 `91a638c99432c5b8ae14371539c6ae29a063f62743f9e7d633d8369250b69263`. O caminho de build acima agora contém `0.1.1`; o hash antigo é somente uma evidência histórica.
 

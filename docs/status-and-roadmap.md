@@ -4,6 +4,8 @@ Atualizado em **9 de outubro de 2026**. Código de referência da Fase 6: `e27ca
 
 O Nexora já tem fundação, autenticação, armazenamento com deduplicação, arquivos/imagens por API e biblioteca com timeline, favoritos, renomeação, lixeira, restauração e coleta segura. A Fase 7 tem ferramentas Linux e procedimentos disponíveis, com execução no Arch e restauração real pendentes. Na Fase 8, o cliente Android usa registro durável de mudanças, cache de metadados e fila de uploads com retomada explícita. O incremento `0.1.1` permite continuar envios iniciados pelo usuário fora da tela, com serviço Android e notificação de pausa; seu aceite no aparelho permanece pendente.
 
+**Retomada após troca de PC:** o usuário não consegue instalar Tailscale no Windows atual. O próximo passo é preparar servidor de desenvolvimento e HTTPS privado em outro PC para testar o APK no celular, sem exigir Arch. O [handoff](handoff.md) registra estado, artefatos, prompt para outro chat e tudo que não vem pelo Git; [new-pc-setup.md](new-pc-setup.md) contém os comandos sequenciais. Inventário dev em 9 de outubro: zero usuários, Assets, Blobs e uploads; storage configurado ainda inexistente; API/Worker ativos e health 200, porém nenhuma URL Tailscale nem login/transferência pelo celular verificados. Isso permite recomendar reprovisionamento vazio com credenciais novas, mantendo o PC antigo até conferir o novo.
+
 ## 1. O que o projeto pretende ser
 
 Uma nuvem pessoal hospedada por você, para guardar e acessar fotos, vídeos e arquivos. O servidor manterá os originais, os metadados e, para imagens compatíveis, versões menores para consulta. Uma conta administrativa poderá acessar a biblioteca por diferentes dispositivos, com sessões revogáveis.

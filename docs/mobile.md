@@ -20,6 +20,8 @@ Ou:
 
 O default é Debug, APK com assemblies incluídos, e o script imprime o caminho de `*-Signed.apk` em `apps/Nexora.Mobile/bin/Debug/net10.0-android`. A assinatura de desenvolvimento serve ao ensaio por instalação manual; distribuição, chave de assinatura de produção e publicação em loja são etapas futuras. O projeto tem arquiteturas ARM64 e x64 e exige Android 7/API 24 ou superior.
 
+Ao trocar de PC, o APK e o keystore Debug não vêm pelo Git. Uma chave nova pode impedir atualizar o app já instalado com `install -r`; desinstalar remove cache, sessão e fontes privadas de uploads pendentes. Confira assinatura e preserve a fila antes de decidir por reinstalação. O [setup do novo PC](new-pc-setup.md) registra as opções de transferência privada/recompilação; o [handoff](handoff.md) inclui o inventário da máquina anterior.
+
 O núcleo e seus testes pertencem a `Nexora.sln`. O projeto que exige as ferramentas Android fica na solução separada `apps/Nexora.Mobile.sln`, permitindo validar backend e protocolo sem instalar MAUI.
 
 Com um dispositivo de ensaio conectado e depuração USB autorizada, use o `adb` do SDK para conferir o alvo e instalar o APK no dispositivo escolhido:

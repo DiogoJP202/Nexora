@@ -2,7 +2,7 @@
 
 O APK pode ser testado com PostgreSQL, API e Worker no Windows. Arch é o destino de produção; não é necessário para este ensaio. O servidor usa o banco e o storage locais de desenvolvimento.
 
-Em 9 de outubro de 2026, PostgreSQL estava ativo, migrations atualizadas, API em `http://127.0.0.1:5100` e Worker em execução. `/health/live` e `/health/ready` retornaram `200`, com `{"status":"Healthy"}`. A conta administrativa ainda não havia sido criada. Isso verifica o servidor local; conexão pelo Tailscale e execução do APK no celular continuam dependendo das etapas abaixo.
+Em 9 de outubro de 2026, PostgreSQL estava ativo, migrations atualizadas, API em `http://127.0.0.1:5100` e Worker em execução. `/health/live` e `/health/ready` retornaram `200`, com `{"status":"Healthy"}`. A conta administrativa ainda não havia sido criada. O usuário informou que não consegue instalar Tailscale nesse PC e continuará em outro: nenhuma URL HTTPS privada foi estabelecida nem conexão/login/transferência pelo celular verificados. Para preparar a máquina nova antes deste roteiro, siga [new-pc-setup.md](new-pc-setup.md); o estado completo e o prompt de retomada estão em [handoff.md](handoff.md).
 
 ## 1. Conectar o PC e o celular
 
