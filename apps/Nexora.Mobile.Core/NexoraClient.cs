@@ -12,7 +12,7 @@ public sealed class NexoraClient
     private readonly ISecureSessionStore sessions;
     private readonly IInstallationIdentity installation;
     private readonly TimeProvider clock;
-    private readonly SemaphoreSlim scopeGate = new(1, 1);
+    private readonly ScopeLeaseGate scopeGate = new();
     private readonly AsyncLocal<ScopeOperation?> scopeOperation = new();
     private readonly SemaphoreSlim authenticationGate = new(1, 1);
     private SecureSession? session;
@@ -39,8 +39,7 @@ public sealed class NexoraClient
     {
         if (scopeOperation.Value?.IsActive == true)
             throw new InvalidOperationException("Não altere a conta ou o servidor durante uma operação do cliente.");
-        await scopeGate.WaitAsync(cancellationToken);
-        try
+        using (await scopeGate.WriteAsync(cancellationToken))
         {
             await authenticationGate.WaitAsync(cancellationToken);
             try
@@ -53,7 +52,6 @@ public sealed class NexoraClient
             }
             finally { authenticationGate.Release(); }
         }
-        finally { scopeGate.Release(); }
     }
 
     // A scope lease spans local I/O and all nested HTTP calls. Configuration cannot
@@ -65,8 +63,7 @@ public sealed class NexoraClient
         var lease = previous;
         if (lease is null || !lease.TryAddReference())
         {
-            await scopeGate.WaitAsync(cancellationToken);
-            lease = new ScopeOperation(scopeGate);
+            lease = new ScopeOperation(await scopeGate.ReadAsync(cancellationToken));
         }
         scopeOperation.Value = lease;
         try { return await operation(); }
@@ -359,7 +356,7 @@ public sealed class NexoraClient
         return result.ToArray();
     }
 
-    private sealed class ScopeOperation(SemaphoreSlim gate)
+    private sealed class ScopeOperation(IDisposable admission)
     {
         private int references = 1;
         internal bool IsActive => Volatile.Read(ref references) > 0;
@@ -375,7 +372,7 @@ public sealed class NexoraClient
         }
         internal void Release()
         {
-            if (Interlocked.Decrement(ref references) == 0) gate.Release();
+            if (Interlocked.Decrement(ref references) == 0) admission.Dispose();
         }
     }
 }

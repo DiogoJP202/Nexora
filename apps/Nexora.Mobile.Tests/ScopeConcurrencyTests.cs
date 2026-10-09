@@ -165,6 +165,119 @@ public sealed class ScopeConcurrencyTests
         await switching.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(OtherScope, fixture.Client.Scope);
     }
+
+    [Fact]
+    public async Task CachedLibraryAndAuthenticatedReadsProceedDuringUploadBeforeQueuedScopeChange()
+    {
+        using var directory = new PrivateDirectory();
+        var fixture = new ClientFixture();
+        var asset = new AssetSnapshot(Guid.NewGuid(), "cached.txt", 3, "text/plain", fixture.Clock.Now, false, null);
+        var uploadId = Guid.NewGuid();
+        fixture.Handler.Handle = (request, _) => Task.FromResult(request.RequestUri!.AbsolutePath switch
+        {
+            "/api/sync" => MockHandler.Json(new SyncSnapshotPage([asset], null, "alice-cursor")),
+            "/api/assets" => MockHandler.Json(new AssetPage([asset], null)),
+            _ => MockHandler.Json(new UploadSnapshot(uploadId, "private.bin", 3, 4, 1,
+                UploadState.Finalizing, [], fixture.Clock.Now, fixture.Clock.Now, null, null, null))
+        });
+        await fixture.InitializeAsync();
+        var files = new BlockingPrivateFileStore(directory.Path);
+        var cache = new LocalLibraryCache(files, fixture.Client);
+        var outbox = new UploadOutbox(files, fixture.Client);
+        await cache.SynchronizeAsync();
+        using var source = new MemoryStream([1, 2, 3]);
+        var queued = await outbox.EnqueueAsync("private.bin", source);
+        files.Arm(".source");
+        var upload = outbox.ResumeAsync(queued.Id);
+        await files.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Single((await cache.GetCachedAsync().WaitAsync(TimeSpan.FromSeconds(5))).Items);
+        Assert.Single((await fixture.Client.ListAssetsAsync().WaitAsync(TimeSpan.FromSeconds(5))).Items);
+        Assert.Single(await outbox.ListAsync().WaitAsync(TimeSpan.FromSeconds(5)));
+
+        var changing = fixture.Client.ConfigureAsync(OtherScope);
+        var laterRead = cache.GetCachedAsync();
+        Assert.False(changing.IsCompleted);
+        Assert.False(laterRead.IsCompleted);
+        files.Continue.TrySetResult();
+        await upload.WaitAsync(TimeSpan.FromSeconds(5));
+        await changing.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Empty((await laterRead.WaitAsync(TimeSpan.FromSeconds(5))).Items);
+    }
+
+    [Fact]
+    public async Task CancelledScopeWriterAllowsWaitingReadersWithoutWaitingForExistingReader()
+    {
+        var fixture = new ClientFixture();
+        await fixture.InitializeAsync();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continuation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = fixture.Client.ExecuteInScopeAsync(async () =>
+        {
+            entered.TrySetResult();
+            await continuation.Task;
+        });
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        using var cancellation = new CancellationTokenSource();
+        var changing = fixture.Client.ConfigureAsync(OtherScope, cancellation.Token);
+        var later = fixture.Client.ExecuteInScopeAsync(() => Task.FromResult(fixture.Client.Scope!.Key));
+        Assert.False(later.IsCompleted);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => changing);
+        Assert.Equal(fixture.Scope.Key, await later.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.False(first.IsCompleted);
+        continuation.TrySetResult();
+        await first;
+    }
+
+    [Fact]
+    public async Task AtomicCacheReplaceSucceedsWhileExistingReaderHasOldFileOpen()
+    {
+        using var directory = new PrivateDirectory();
+        var fixture = new ClientFixture();
+        var asset = new AssetSnapshot(Guid.NewGuid(), "private.txt", 3, "text/plain", fixture.Clock.Now, false, null);
+        fixture.Handler.Handle = (request, _) => Task.FromResult(request.RequestUri!.AbsolutePath == "/api/sync"
+            ? MockHandler.Json(new SyncSnapshotPage([asset], null, "old-cursor"))
+            : MockHandler.Json(new SyncChangePage([new SyncChange(1, "upsert", asset.Id,
+                asset with { IsFavorite = true })], "new-cursor", false)));
+        await fixture.InitializeAsync();
+        var files = new BlockingPrivateFileStore(directory.Path);
+        var cache = new LocalLibraryCache(files, fixture.Client);
+        await cache.SynchronizeAsync();
+        files.Arm("metadata.json");
+        var oldRead = cache.GetCachedAsync();
+        await files.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var updated = await cache.SynchronizeAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(Assert.Single(updated.Items).IsFavorite);
+        files.Continue.TrySetResult();
+        var previous = await oldRead.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("old-cursor", previous.Cursor);
+        Assert.False(Assert.Single(previous.Items).IsFavorite);
+        Assert.Equal("new-cursor", (await cache.GetCachedAsync()).Cursor);
+    }
+
+    [Fact]
+    public async Task DeferredOperationWithExpiredAmbientLeaseDoesNotReuseOldAccount()
+    {
+        var fixture = new ClientFixture();
+        await fixture.InitializeAsync();
+        var continuation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<AssetPage>? deferred = null;
+        async Task<AssetPage> StartLaterAsync()
+        {
+            await continuation.Task;
+            return await fixture.Client.ListAssetsAsync();
+        }
+        await fixture.Client.ExecuteInScopeAsync(() =>
+        {
+            deferred = StartLaterAsync();
+            return Task.CompletedTask;
+        });
+        await fixture.Client.ConfigureAsync(OtherScope);
+        continuation.TrySetResult();
+        await Assert.ThrowsAsync<LoginRequiredException>(() => deferred!.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
 }
 
 internal sealed class BlockingPrivateFileStore(string root) : IPrivateFileStore

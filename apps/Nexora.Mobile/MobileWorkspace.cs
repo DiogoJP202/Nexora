@@ -10,21 +10,33 @@ public sealed class MobileWorkspace
     public NexoraClient Client { get; }
     public LocalLibraryCache Library { get; }
     public UploadOutbox Uploads { get; }
+    public UploadTransferCoordinator Transfers { get; }
+    public IUploadTransferRunner TransferRunner { get; }
     public string SelectedServer => Preferences.Default.Get("nexora.selected.server", "");
     public string SelectedLogin => Preferences.Default.Get("nexora.selected.login", "");
 
-    public MobileWorkspace(NexoraClient client)
+    public MobileWorkspace(NexoraClient client, LocalLibraryCache library, UploadOutbox uploads,
+        UploadTransferCoordinator transfers, IUploadTransferRunner transferRunner)
     {
         Client = client;
-        Library = new LocalLibraryCache(root, client);
-        Uploads = new UploadOutbox(root, client);
+        Library = library;
+        Uploads = uploads;
+        Transfers = transfers;
+        TransferRunner = transferRunner;
     }
 
     public async Task ConfigureAsync(ServerScope scope, CancellationToken cancellationToken = default)
     {
+        await TransferRunner.PauseAsync(cancellationToken);
         await Client.ConfigureAsync(scope, cancellationToken);
         Preferences.Default.Set("nexora.selected.server", scope.Server.AbsoluteUri);
         Preferences.Default.Set("nexora.selected.login", scope.Login);
+    }
+
+    public async Task LogoutAsync(CancellationToken cancellationToken = default)
+    {
+        await TransferRunner.PauseAsync(cancellationToken);
+        await Client.LogoutAsync(cancellationToken);
     }
 
     public async Task<bool> TryRestoreSelectedAsync(CancellationToken cancellationToken = default)
@@ -33,6 +45,9 @@ public sealed class MobileWorkspace
         ServerScope scope;
         try { scope = ServerScope.Create(SelectedServer, SelectedLogin); }
         catch (ArgumentException) { return false; }
+        // A recreated/resumed window uses the live client already held by the
+        // foreground service, rather than pausing it to reload the same scope.
+        if (Client.Scope?.Key == scope.Key) return Client.IsSignedIn;
         await ConfigureAsync(scope, cancellationToken);
         return Client.IsSignedIn;
     }

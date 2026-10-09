@@ -2,13 +2,13 @@
 
 Nuvem privada para fotos, vídeos e arquivos pessoais, construída com .NET 10, ASP.NET Core, EF Core e PostgreSQL 18. O destino de produção é um servidor Arch Linux, com systemd e acesso privado por Tailscale.
 
-## Estado atual: cliente Android inicial na Fase 8
+## Estado atual: cliente Android e envios fora da tela na Fase 8
 
 A API inclui autenticação com Identity, tokens opacos, sessões e revogação de dispositivos, além de configuração validada, PostgreSQL, migrations e health checks. Arquivos podem ser enviados em chunks retomáveis, finalizados pelo Worker, listados e baixados com HTTP Range. JPEG, PNG e WebP estáticos recebem metadados, orientação corrigida, thumbnail e preview autenticados. A biblioteca oferece timeline, filtros, favoritos, renomeação, lixeira e restauração. O Worker remove itens após a retenção e coleta somente Blobs sem referências. Blob/Asset mantêm armazenamento imutável, SHA-256 e deduplicação; falha de imagem preserva o original. A conta administrativa é criada somente por comando local.
 
 As fases 1 a 6 foram verificadas no Windows. A Fase 7 acrescenta publicação para Linux x64, unidades systemd, instalação e ativação explícitas, configuração privada e procedimentos de backup/restauração. A execução real no Arch, o HTTPS privado e o exercício de recuperação permanecem pendentes. Consulte [instalação no Arch](docs/arch-deployment.md), [backup e restauração](docs/backup-and-restore.md) e o [registro de validação](docs/arch-validation.md).
 
-O primeiro cliente MAUI Android inclui login, sessão protegida, biblioteca com cache offline, favoritos/lixeira, previews e fila de uploads retomáveis em primeiro plano. O backend oferece snapshot e alterações incrementais, incluindo exclusões definitivas. O núcleo mobile e seus testes fazem parte de `Nexora.sln`; o app Android tem uma solução separada, `apps/Nexora.Mobile.sln`, para manter o backend compilável sem workloads mobile. O aceite visual e dos fluxos no dispositivo permanece pendente.
+O cliente MAUI Android inclui login, sessão protegida, biblioteca com cache offline, favoritos/lixeira, previews e fila de uploads retomáveis. Um envio iniciado pelo usuário pode continuar ao navegar ou colocar o app em segundo plano, por um serviço Android com notificação e pausa; após perda do processo, a retomada é manual. O backend oferece snapshot e alterações incrementais, incluindo exclusões definitivas. O núcleo mobile e seus testes fazem parte de `Nexora.sln`; o app Android tem uma solução separada, `apps/Nexora.Mobile.sln`, para manter o backend compilável sem workloads mobile. O aceite visual e dos fluxos no dispositivo permanece pendente.
 
 Para gerar o APK com os SDKs Android/JDK existentes, execute `pwsh -File scripts/Build-Android.ps1`. Requisitos, instalação e roteiro de aceite estão em [cliente Android](docs/mobile.md). A sincronização e a recuperação após backup estão em [contrato de sincronização](docs/synchronization.md).
 
@@ -83,7 +83,8 @@ Testes unitários, HTTP/configuração e filesystem executam sem PostgreSQL. Tes
 - [Uploads e Worker](docs/uploads.md): contratos HTTP, retomada, finalização durável, download e capacidade.
 - [Imagens e derivados](docs/images.md): metadados, estados, configuração, processo nativo, publicação e recuperação.
 - [Biblioteca e lixeira](docs/library.md): timeline, filtros, edição, restauração, retenção e coleta segura.
-- [Cliente Android](docs/mobile.md): APK, sessão segura, cache offline, uploads em primeiro plano e aceite no dispositivo.
+- [Cliente Android](docs/mobile.md): APK, sessão segura, cache offline, uploads e aceite no dispositivo.
+- [Uploads fora da tela](docs/android-background-uploads.md): serviço Android, notificação/pausa, restrições e testes manuais pendentes.
 - [Validação mobile](docs/mobile-validation.md): testes locais, APK verificado e evidências que ainda dependem do dispositivo.
 - [Sincronização](docs/synchronization.md): snapshot, journal, cursores, exclusões e recuperação após backup.
 - [Instalação e operação no Arch](docs/arch-deployment.md): pacote Linux, PostgreSQL, systemd, Tailscale, atualização e diagnóstico.

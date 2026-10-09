@@ -2,7 +2,7 @@
 
 Atualizado em **9 de outubro de 2026**. Código de referência da Fase 6: `e27ca91`; preparação da Fase 7: `fb7d9b6`; incremento Android/sincronização da Fase 8: `089c593`. As fases 1 a 6 foram verificadas localmente no Windows com PostgreSQL nativo. A Fase 8 acrescenta o primeiro cliente Android; a operação no Arch e o aceite no dispositivo continuam pendentes.
 
-O Nexora já tem fundação, autenticação, armazenamento com deduplicação, arquivos/imagens por API e biblioteca com timeline, favoritos, renomeação, lixeira, restauração e coleta segura. A Fase 7 tem ferramentas Linux e procedimentos disponíveis, com execução no Arch e restauração real pendentes. Na Fase 8, o cliente Android usa registro durável de mudanças, cache de metadados e fila de uploads com retomada explícita.
+O Nexora já tem fundação, autenticação, armazenamento com deduplicação, arquivos/imagens por API e biblioteca com timeline, favoritos, renomeação, lixeira, restauração e coleta segura. A Fase 7 tem ferramentas Linux e procedimentos disponíveis, com execução no Arch e restauração real pendentes. Na Fase 8, o cliente Android usa registro durável de mudanças, cache de metadados e fila de uploads com retomada explícita. O incremento `0.1.1` permite continuar envios iniciados pelo usuário fora da tela, com serviço Android e notificação de pausa; seu aceite no aparelho permanece pendente.
 
 ## 1. O que o projeto pretende ser
 
@@ -145,15 +145,18 @@ Os [contratos de armazenamento](storage.md) detalham essa fundação. A Fase 4 a
 - [x] `Nexora.Mobile.Core` independente do Android: cliente HTTPS, refresh serializado, cache atômico e fila persistente com cópia/hash privados.
 - [x] `Nexora.Mobile` MAUI Android: login, armazenamento seguro, filtros/busca, favoritos/lixeira, detalhe, PNG e original por ação explícita.
 - [x] Fila manual de upload, progresso, pausa e retomada a partir dos chunks confirmados no servidor.
+- [x] Serviço Android `dataSync` para um envio explícito, notificação genérica e pausa; vida independente da página e sem reinício automático.
+- [x] Leituras concorrentes da biblioteca durante o envio, troca de escopo exclusiva e finalização acompanhada por tempo limitado.
 - [x] Solução Android separada e script de build que utiliza Android SDK/JDK existentes, sem exigir esses workloads no build do backend.
 - [x] Rotação de época após restauração isolada para invalidar cursores de uma história anterior.
 - [ ] Executar o [roteiro de aceite Android](mobile.md) em dispositivo/emulador, incluindo layout, reinstalação, revogação, offline e encerramento do processo durante upload.
-- [ ] Projetar execução em background/integração com galeria em um incremento posterior.
+- [ ] Validar serviço, notificações, permissões, tela bloqueada e timeout no aparelho conforme [android-background-uploads.md](android-background-uploads.md).
+- [ ] Projetar galeria automática, sincronização periódica e UIDT para transferências longas posteriormente.
 - [ ] Evoluir para iOS e assinatura/distribuição de produção posteriormente.
 
-O app opera em primeiro plano e mantém metadados e conteúdo baixado no diretório privado. Não agenda sincronização da galeria nem uploads em background. O journal não tem compactação automática nesta entrega. [mobile.md](mobile.md) e [synchronization.md](synchronization.md) registram os contratos e limites.
+O app mantém metadados e conteúdo baixado no diretório privado. O serviço acompanha somente um envio iniciado com Activity visível; não agenda galeria nem retoma envios após perda do processo. O journal não tem compactação automática nesta entrega. [mobile.md](mobile.md), [android-background-uploads.md](android-background-uploads.md) e [synchronization.md](synchronization.md) registram os contratos e limites.
 
-**Validação local em 9 de outubro de 2026:** restore travado, 274 testes aprovados (60 unitários, 181 de integração, 33 mobile), sem falhas/ignorados. Migrations novas aplicadas ao banco de desenvolvimento, API/health/OpenAPI verificados e APK Debug assinado gerado com zero avisos/erros. O pacote inclui app/núcleo em ARM64/x64, API mínima 24 e target 36; assinatura e manifest foram inspecionados. [mobile-validation.md](mobile-validation.md) registra comandos, tamanho/hash do APK e limites da evidência. Nenhum dispositivo/emulador estava disponível para o aceite Android.
+**Validação local em 9 de outubro de 2026:** restore travado e **293 testes aprovados** (60 unitários, 181 de integração, 52 mobile), sem falhas/ignorados. Os 19 casos novos cobrem pausa/retomada, revogação, acompanhamento limitado, reentrada, leituras concorrentes e troca de escopo. O incremento Android inicial (`089c593`) também teve migrations, API/health/OpenAPI e APK verificados. [mobile-validation.md](mobile-validation.md) registra o pacote atual e os limites da evidência. Nenhum dispositivo/emulador estava disponível para o aceite Android.
 
 ### Superfície HTTP disponível
 
@@ -242,7 +245,8 @@ O incremento Android foi implementado antes do aceite real da operação no Arch
 - [x] Implementar consulta de biblioteca, derivados e upload retomável usando os contratos da API.
 - [x] Implementar cache offline e retomada manual com testes do núcleo independente da plataforma.
 - [ ] Verificar os fluxos e comportamento offline no dispositivo Android, conforme roteiro de aceite.
-- [ ] Projetar e testar sincronização em background com as restrições Android em fase posterior.
+- [x] Implementar envio explícito fora da página com serviço Android, pausa e recuperação durável da fila.
+- [ ] Validar seu ciclo de vida no Android; evolução para UIDT/galeria e sincronização periódica permanece posterior.
 - [ ] Evoluir para iOS posteriormente, considerando as restrições específicas da plataforma.
 
 **Aceite inicial:** um dispositivo Android autentica, consulta a biblioteca e envia arquivos com retomada; trata revogação e necessidade de novo login; sincronização não cria duplicatas nem perde exclusões. O aceite de iOS será definido quando essa etapa começar.

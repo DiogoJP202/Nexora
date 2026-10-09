@@ -23,10 +23,19 @@ public sealed class LibraryPage : ContentPage
     private readonly ScrollView queuePanel;
     private readonly CollectionView assets;
     private readonly List<Button> filterButtons = [];
+    private readonly List<(Button Button, Guid ItemId, bool StartsTransfer)> queueActions = [];
     private IReadOnlyList<AssetSnapshot> snapshot = [];
     private CancellationTokenSource? operation;
+    private CancellationTokenSource? appearance;
+    private CancellationToken appearanceToken;
+    private TransferSnapshot? observedTransfer;
     private int selectedFilter;
     private bool busy;
+    private bool preparingCopy;
+    private bool pausing;
+    private bool localRefreshPending;
+    private bool refreshingLocal;
+    private bool redirectingToLogin;
     private bool firstAppearance = true;
 
     public LibraryPage(MobileWorkspace workspace)
@@ -99,7 +108,11 @@ public sealed class LibraryPage : ContentPage
         sync.Clicked += async (_, _) => await RunAsync(SynchronizeAsync);
         upload.Clicked += async (_, _) => await RunAsync(PickAndUploadAsync, sending: true);
         queue.Clicked += (_, _) => queuePanel.IsVisible = !queuePanel.IsVisible;
-        cancel.Clicked += (_, _) => operation?.Cancel();
+        cancel.Clicked += async (_, _) =>
+        {
+            if (preparingCopy) operation?.Cancel();
+            else await PauseTransferAsync();
+        };
         logout.Clicked += async (_, _) => await RunAsync(LogoutAsync);
         assets.SelectionChanged += async (_, args) =>
         {
@@ -113,6 +126,15 @@ public sealed class LibraryPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
+        appearance?.Dispose();
+        appearance = new CancellationTokenSource();
+        appearanceToken = appearance.Token;
+        workspace.Transfers.Changed -= OnTransferChanged;
+        workspace.Transfers.Changed += OnTransferChanged;
+        workspace.TransferRunner.StateChanged -= OnRunnerStateChanged;
+        workspace.TransferRunner.StateChanged += OnRunnerStateChanged;
+        observedTransfer = workspace.Transfers.Current;
+        RenderTransfer();
         var synchronize = firstAppearance;
         firstAppearance = false;
         await RunAsync(async token =>
@@ -127,13 +149,115 @@ public sealed class LibraryPage : ContentPage
 
     protected override void OnDisappearing()
     {
+        workspace.Transfers.Changed -= OnTransferChanged;
+        workspace.TransferRunner.StateChanged -= OnRunnerStateChanged;
+        appearance?.Cancel();
+        appearance?.Dispose();
+        appearance = null;
         operation?.Cancel();
         base.OnDisappearing();
+    }
+
+    private void OnTransferChanged(TransferSnapshot value)
+    {
+        var visible = appearance;
+        if (visible is null) return;
+        var token = appearanceToken;
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            try
+            {
+                if (!ReferenceEquals(appearance, visible) || token.IsCancellationRequested) return;
+                var current = workspace.Transfers.Current;
+                var previous = observedTransfer;
+                observedTransfer = current;
+                RenderTransfer();
+                if (current.ScopeKey != workspace.Client.Scope?.Key) return;
+                if (current.Stage == TransferStage.LoginRequired || current.LibrarySyncFailureCode == "login_required")
+                {
+                    await RequireLoginAsync();
+                    return;
+                }
+                if (!current.IsRunning && current.Stage != TransferStage.Idle &&
+                    (previous is null || previous.ItemId != current.ItemId || previous.Stage != current.Stage)) localRefreshPending = true;
+                await RefreshLocalAfterTransferAsync(token);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception) { status.Text = "Acompanhe o envio na fila. A cópia local continua disponível."; }
+        });
+    }
+
+    private void OnRunnerStateChanged() => OnTransferChanged(workspace.Transfers.Current);
+
+    private async Task PauseTransferAsync()
+    {
+        if (pausing) return;
+        pausing = true;
+        UpdateControls();
+        try { await workspace.TransferRunner.PauseAsync(); }
+        catch (OperationCanceledException)
+        {
+            if (appearance is not null) status.Text = "Pausa solicitada. Consulte a fila para acompanhar o envio.";
+        }
+        catch (Exception)
+        {
+            if (appearance is not null) status.Text = "Não foi possível confirmar a pausa. Consulte a fila para acompanhar o envio.";
+        }
+        finally
+        {
+            pausing = false;
+            if (appearance is not null) RenderTransfer();
+        }
+    }
+
+    private async Task RefreshLocalAfterTransferAsync(CancellationToken token)
+    {
+        if (refreshingLocal || busy) return;
+        refreshingLocal = true;
+        try
+        {
+            while (localRefreshPending && !busy)
+            {
+                token.ThrowIfCancellationRequested();
+                localRefreshPending = false;
+                await LoadLocalAsync(token);
+            }
+        }
+        finally { refreshingLocal = false; }
+    }
+
+    private void RenderTransfer()
+    {
+        var current = workspace.Transfers.Current;
+        if (!preparingCopy && current.ScopeKey == workspace.Client.Scope?.Key)
+        {
+            var value = current.Progress;
+            progress.Progress = value is null || value.TotalBytes == 0 ? 0
+                : Math.Clamp((double)value.ConfirmedBytes / value.TotalBytes, 0, 1);
+            transfer.Text = current.Stage switch
+            {
+                TransferStage.Preparing => "Preparando envio…",
+                TransferStage.Uploading when value is not null => $"{MobileWorkspace.FormatBytes(value.ConfirmedBytes)} de {MobileWorkspace.FormatBytes(value.TotalBytes)} · {value.ConfirmedChunks}/{value.TotalChunks} partes",
+                TransferStage.Uploading => "Enviando arquivo…",
+                TransferStage.Finalizing => "O servidor está concluindo o arquivo…",
+                TransferStage.WaitingForServer => "O servidor continua processando. Toque em Consultar na fila para acompanhar.",
+                TransferStage.Completed when current.LibrarySyncFailureCode == "login_required" => "Envio concluído. Entre novamente para atualizar a biblioteca.",
+                TransferStage.Completed when current.LibrarySyncFailureCode is not null => "Envio concluído. Toque em Sincronizar para atualizar a biblioteca.",
+                TransferStage.Completed => "Envio concluído.",
+                TransferStage.Paused => "Envio pausado. Toque em Retomar na fila para continuar.",
+                TransferStage.Failed when current.FailureCode == "asset_in_trash" => "Este conteúdo já está na lixeira. Restaure o item na aba Lixeira.",
+                TransferStage.Failed => "O envio foi interrompido. Consulte a fila para retomar ou remover o item.",
+                TransferStage.LoginRequired => "Entre novamente para continuar os envios salvos.",
+                _ => ""
+            };
+        }
+        UpdateControls();
     }
 
     private async Task LoadLocalAsync(CancellationToken token)
     {
         var cached = await workspace.Library.GetCachedAsync(token);
+        token.ThrowIfCancellationRequested();
         snapshot = cached.Items;
         lastSync.Text = cached.LastSynchronizedAt is { } at
             ? $"Cópia local · sincronizada em {at.ToLocalTime():dd/MM HH:mm}"
@@ -183,30 +307,24 @@ public sealed class LibraryPage : ContentPage
 
     private async Task ResumeUploadAsync(Guid id, CancellationToken token)
     {
-        transfer.Text = "Retomando envio…";
-        var reporting = new Progress<UploadProgress>(value =>
+        token.ThrowIfCancellationRequested();
+        if (workspace.TransferRunner.IsRunning)
         {
-            progress.Progress = value.TotalBytes == 0 ? 0 : (double)value.ConfirmedBytes / value.TotalBytes;
-            transfer.Text = $"{MobileWorkspace.FormatBytes(value.ConfirmedBytes)} de {MobileWorkspace.FormatBytes(value.TotalBytes)} · {value.ConfirmedChunks}/{value.TotalChunks} partes";
-        });
-        var result = await workspace.Uploads.ResumeAsync(id, token, reporting);
-        transfer.Text = result.State switch
-        {
-            OutboxState.Completed => "Envio concluído.",
-            OutboxState.Finalizing => "O servidor está concluindo o arquivo. Consulte novamente na fila.",
-            OutboxState.Failed when result.FailureCode == "asset_in_trash" => "Este conteúdo já está na lixeira. Restaure o item na aba Lixeira.",
-            OutboxState.Failed => "O envio falhou. Remova-o da fila e selecione o arquivo novamente para tentar outro envio.",
-            _ => "Envio salvo na fila. Toque em Retomar para continuar."
-        };
-        await RefreshQueueAsync(token);
-        if (result.State == OutboxState.Completed) await SynchronizeAsync(token);
+            status.Text = "Já existe um envio em andamento. Pause-o para iniciar outro.";
+            return;
+        }
+        await workspace.TransferRunner.StartAsync(id, token);
+        status.Text = "Envio iniciado. Use a fila ou a notificação para acompanhar.";
+        RenderTransfer();
     }
 
     private async Task RefreshQueueAsync(CancellationToken token)
     {
         var pending = (await workspace.Uploads.ListAsync(token)).Where(item => item.State != OutboxState.Completed).ToArray();
+        token.ThrowIfCancellationRequested();
         queue.Text = $"Fila · {pending.Length}";
         queueItems.Children.Clear();
+        queueActions.Clear();
         if (pending.Length == 0)
         {
             queueItems.Children.Add(Text("Nenhum envio pendente.", 13, Palette.Muted));
@@ -216,6 +334,7 @@ public sealed class LibraryPage : ContentPage
         {
             var action = ActionButton(item.State == OutboxState.Finalizing ? "Consultar" : item.State == OutboxState.Failed ? "Remover" : "Retomar");
             action.Padding = new Thickness(12, 8);
+            queueActions.Add((action, item.Id, item.State != OutboxState.Failed));
             action.Clicked += async (_, _) => await RunAsync(async cancellationToken =>
             {
                 if (item.State == OutboxState.Failed)
@@ -224,18 +343,22 @@ public sealed class LibraryPage : ContentPage
                     await RefreshQueueAsync(cancellationToken);
                 }
                 else await ResumeUploadAsync(item.Id, cancellationToken);
-            }, sending: item.State != OutboxState.Failed);
-            var state = item.State switch { OutboxState.Finalizing => "Concluindo no servidor", OutboxState.Failed => "Falhou", _ => "Pendente" };
+            });
+            var current = workspace.Transfers.Current;
+            var state = current.IsRunning && current.ItemId == item.Id ? "Em andamento"
+                : item.State switch { OutboxState.Finalizing => "Concluindo no servidor", OutboxState.Failed => "Falhou", _ => "Pendente" };
             var itemActions = new VerticalStackLayout { Spacing = 4, Children = { action } };
             if (item.State != OutboxState.Failed)
             {
                 var remove = ActionButton("Cancelar");
                 remove.TextColor = Palette.Muted;
                 remove.Padding = new Thickness(12, 8);
+                queueActions.Add((remove, item.Id, false));
                 remove.Clicked += async (_, _) => await RunAsync(async cancellationToken =>
                 {
                     if (!await DisplayAlertAsync("Cancelar envio", "Cancelar se ainda estiver pendente e remover a cópia da fila? Arquivos já concluídos permanecem na biblioteca.", "Cancelar envio", "Manter")) return;
                     cancellationToken.ThrowIfCancellationRequested();
+                    if (workspace.TransferRunner.IsRunning) await workspace.TransferRunner.PauseAsync(cancellationToken);
                     await workspace.Uploads.RemoveAsync(item.Id, cancellationToken);
                     await RefreshQueueAsync(cancellationToken);
                     transfer.Text = "Envio removido da fila.";
@@ -251,11 +374,12 @@ public sealed class LibraryPage : ContentPage
             grid.Add(itemActions, 1);
             queueItems.Children.Add(Card(grid, new Thickness(12)));
         }
+        UpdateControls();
     }
 
     private async Task LogoutAsync(CancellationToken token)
     {
-        try { await workspace.Client.LogoutAsync(token); }
+        try { await workspace.LogoutAsync(token); }
         finally
         {
             if (!workspace.Client.IsSignedIn && Window is { } window) window.Page = new LoginPage(workspace);
@@ -285,14 +409,26 @@ public sealed class LibraryPage : ContentPage
         {
             operation = null;
             SetBusy(false, false);
+            if (appearance is { } visible)
+            {
+                var token = appearanceToken;
+                try
+                {
+                    if (ReferenceEquals(appearance, visible)) await RefreshLocalAfterTransferAsync(token);
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception) { status.Text = "Não foi possível atualizar a fila. Consulte-a novamente para acompanhar os envios."; }
+            }
         }
     }
 
     private async Task RequireLoginAsync()
     {
+        if (redirectingToLogin || appearance is null) return;
+        redirectingToLogin = true;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        try { await workspace.Client.LogoutAsync(timeout.Token); }
-        catch (Exception) { /* Credentials are cleared before remote revocation. */ }
+        try { await workspace.LogoutAsync(timeout.Token); }
+        catch (Exception) { /* A sessão inválida poderá exigir nova autenticação local. */ }
         await DisplayAlertAsync("Entre novamente", "Sua sessão expirou ou este dispositivo perdeu o acesso. Entre para continuar.", "OK");
         if (Window is { } window) window.Page = new LoginPage(workspace);
     }
@@ -300,11 +436,25 @@ public sealed class LibraryPage : ContentPage
     private void SetBusy(bool value, bool sending)
     {
         busy = value;
-        sync.IsEnabled = upload.IsEnabled = logout.IsEnabled = queue.IsEnabled = !value;
-        filters.IsEnabled = search.IsEnabled = assets.IsEnabled = queuePanel.IsEnabled = !value;
-        cancel.IsVisible = value && sending;
-        progress.IsVisible = value && sending;
-        if (value) { status.Text = ""; transfer.Text = ""; progress.Progress = 0; }
+        preparingCopy = value && sending;
+        if (value) status.Text = "";
+        if (preparingCopy) { transfer.Text = ""; progress.Progress = 0; }
+        if (!value) RenderTransfer();
+        else UpdateControls();
+    }
+
+    private void UpdateControls()
+    {
+        var active = workspace.TransferRunner.IsRunning;
+        var current = workspace.Transfers.Current;
+        sync.IsEnabled = logout.IsEnabled = queue.IsEnabled = !busy;
+        upload.IsEnabled = !busy && !active;
+        filters.IsEnabled = search.IsEnabled = assets.IsEnabled = queuePanel.IsEnabled = !busy;
+        cancel.IsVisible = preparingCopy || active;
+        cancel.IsEnabled = preparingCopy || active && !pausing;
+        progress.IsVisible = preparingCopy || active;
+        foreach (var action in queueActions)
+            action.Button.IsEnabled = !busy && (!active || !action.StartsTransfer && current.IsRunning && current.ItemId == action.ItemId);
     }
 
     private static View BuildAssetRow()

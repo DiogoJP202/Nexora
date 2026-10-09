@@ -10,8 +10,8 @@
     <MauiVersion>10.0.110</MauiVersion>
     <ApplicationTitle>Nexora</ApplicationTitle>
     <ApplicationId>com.nexora.mobile</ApplicationId>
-    <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
-    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1.1</ApplicationDisplayVersion>
+    <ApplicationVersion>2</ApplicationVersion>
     <SupportedOSPlatformVersion>24.0</SupportedOSPlatformVersion>
     <AndroidPackageFormats>apk</AndroidPackageFormats>
     <AndroidKeyStore>false</AndroidKeyStore>

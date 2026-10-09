@@ -35,7 +35,7 @@ public sealed class AppPrivateFileStore : IPrivateFileStore
     public Task<Stream> OpenReadAsync(string relativePath, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult<Stream>(new FileStream(PathOf(relativePath), FileMode.Open, FileAccess.Read, FileShare.Read,
+        return Task.FromResult<Stream>(new FileStream(PathOf(relativePath), FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete,
             64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan));
     }
     public Task<Stream> CreateAsync(string relativePath, CancellationToken cancellationToken = default)
@@ -48,7 +48,13 @@ public sealed class AppPrivateFileStore : IPrivateFileStore
     }
     public bool Exists(string relativePath) => File.Exists(PathOf(relativePath));
     public long Length(string relativePath) => new FileInfo(PathOf(relativePath)).Length;
-    public void Move(string source, string destination) => File.Move(PathOf(source), PathOf(destination), overwrite: true);
+    public void Move(string source, string destination)
+    {
+        var sourcePath = PathOf(source);
+        var destinationPath = PathOf(destination);
+        if (File.Exists(destinationPath)) File.Replace(sourcePath, destinationPath, destinationBackupFileName: null);
+        else File.Move(sourcePath, destinationPath);
+    }
     public void Delete(string relativePath) => File.Delete(PathOf(relativePath));
     public IEnumerable<string> List(string directory, string pattern)
     {

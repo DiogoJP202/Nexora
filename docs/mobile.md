@@ -1,6 +1,6 @@
 # Cliente Android
 
-A Fase 8 implementa o cliente .NET MAUI em `apps/Nexora.Mobile`, começando por Android, e o protocolo/persistência em `apps/Nexora.Mobile.Core`. Os testes de núcleo ficam em `apps/Nexora.Mobile.Tests` e rodam sem o SDK Android. Build de APK e testes de protocolo não comprovam comportamento visual nem execução em um dispositivo: o aceite Android continua dependendo do roteiro manual abaixo. A operação real do backend no Arch também permanece pendente, conforme [arch-validation.md](arch-validation.md).
+A Fase 8 implementa o cliente .NET MAUI em `apps/Nexora.Mobile`, começando por Android, e o protocolo/persistência em `apps/Nexora.Mobile.Core`. O incremento de uploads permite continuar um envio escolhido pelo usuário fora da página por um serviço Android `dataSync`, conforme [android-background-uploads.md](android-background-uploads.md). Os testes de núcleo ficam em `apps/Nexora.Mobile.Tests` e rodam sem o SDK Android. Build de APK e testes de protocolo não comprovam comportamento visual nem execução em um dispositivo: o aceite Android continua dependendo do roteiro manual abaixo. A operação real do backend no Arch também permanece pendente, conforme [arch-validation.md](arch-validation.md).
 
 ## Compilar e instalar para o ensaio
 
@@ -37,7 +37,7 @@ Informe a URL raiz HTTPS do servidor privado e a conta administrativa já criada
 
 O núcleo admite HTTP de desenvolvimento somente quando explicitamente habilitado, para loopback ou `10.0.2.2`; essa opção não é habilitada na interface Android e seu manifest bloqueia cleartext. Um endpoint HTTP local da API precisa de uma entrada HTTPS confiável para uso neste APK.
 
-Access/refresh tokens pertencem ao armazenamento seguro da plataforma, separado dos JSON de cache/fila. Senha não é persistida. A identificação da instalação/dispositivo e os dados locais são separados por URL canônica e conta. Android backup e transferência de dados do app são desabilitados no manifest/regras Android para evitar restaurar a cópia de uma credencial rotativa. O núcleo mantém o escopo durante as operações assíncronas; a troca de servidor/conta aguarda leituras, hashing e requisições pendentes terminarem ou serem canceladas.
+Access/refresh tokens pertencem ao armazenamento seguro da plataforma, separado dos JSON de cache/fila. Senha não é persistida. A identificação da instalação/dispositivo e os dados locais são separados por URL canônica e conta. Android backup e transferência de dados do app são desabilitados no manifest/regras Android para evitar restaurar a cópia de uma credencial rotativa. O núcleo mantém o escopo durante as operações assíncronas: leituras podem compartilhar o escopo atual, enquanto configurar outra conta/servidor exige exclusividade. A interface pausa um envio ativo antes de sair ou trocar o escopo, aguardando seu encerramento e as demais operações pendentes.
 
 Refresh é serializado e remove o token persistido antes de enviar a requisição de uso único. Uma resposta perdida, cancelamento ou interrupção nessa janela exige novo login; o app não repete o token consumido. `401` também limpa a sessão local. Logout remove credenciais locais antes de tentar revogar a sessão no servidor; sem conexão, a revogação remota depende de conectividade ou da administração de dispositivos. Consulte [authentication.md](authentication.md).
 
@@ -55,7 +55,7 @@ Cópias baixadas podem ser reutilizadas offline quando o último cache informa q
 
 Originais baixados ficam no cache interno `nexora-sharing/<escopo>/`. O FileProvider permite apenas essa pasta; cache de metadados, fila e sessão não são caminhos compartilháveis. Abrir um original concede leitura daquele arquivo ao app escolhido, sem uma segunda cópia síncrona do arquivo inteiro. O [Launcher do MAUI](https://learn.microsoft.com/en-us/dotnet/maui/platform-integration/appmodel/launcher?view=net-maui-10.0) descreve o controle dos caminhos compartilhados. O roteiro Android precisa conferir abertura, permissão e remoção do cache pelo sistema no dispositivo.
 
-## Fila de upload em primeiro plano
+## Fila de upload e serviço Android
 
 A seleção usa o stream fornecido pelo FilePicker. Antes de criar uma sessão remota, a fila copia os bytes para um arquivo privado, calcula SHA-256 e grava os metadados. O arquivo original selecionado pode deixar de estar acessível depois disso. A cópia privada ocupa espaço local proporcional ao arquivo, limitada a 20 GiB por item; falta de espaço ou cancelamento da cópia falha antes do envio.
 
@@ -63,11 +63,17 @@ Cada item tem UUID persistido, enviado como `clientRequestId` na criação de up
 
 Uma restauração do banco pode remover a sessão remota ainda referenciada pela fila. Se uma retomada explícita receber `404 resource_not_found` ao consultá-la, o cliente persiste a remoção do ID/progresso antigo, verifica a cópia privada e cria/recupera a sessão usando o mesmo `clientRequestId`. Uma nova perda de resposta continua retomável sem duplicar a reserva. Isso exige a cópia privada original ainda disponível; um item já concluído teve essa cópia removida e não reenvia bytes perdidos pelo servidor automaticamente.
 
-Enviar/retomar é uma ação explícita na interface. Cancelar uma tentativa interrompe o trabalho local e permite nova retomada; remover um item tenta cancelar a sessão remota antes de excluir a cópia privada. Após uma criação com resposta perdida (`CreateInFlight` sem ID remoto), a remoção recupera a sessão pelo mesmo UUID, persiste seu ID e solicita o cancelamento. Um item apenas pendente, nunca enviado, é removido localmente sem criar sessão remota. `404` na exclusão da sessão significa que ela já está ausente; `409` ou falha de rede preservam os dados locais para consulta/nova tentativa. Sessões já terminais permitem a limpeza local. A finalização é durável no Worker e pode exigir nova consulta até chegar ao resultado. O app não agenda uploads em background, não observa a galeria e não faz sincronização automática do Android.
+Enviar/retomar é uma ação explícita na interface, após persistir a cópia privada. Há um único envio ativo. O Android inicia um serviço em primeiro plano `dataSync`, com notificação genérica de progresso e ação **Pausar**; o envio pode continuar ao navegar ou pressionar Home, independentemente da vida da página. Biblioteca e detalhe permanecem consultáveis durante a transferência. A permissão de notificações em Android 13+ pode ser recusada sem bloquear o serviço, mas sua ação na gaveta fica indisponível; a pausa continua acessível na interface.
+
+Pausar interrompe a tentativa local e permite nova retomada; remover um item tenta cancelar a sessão remota antes de excluir a cópia privada. Após uma criação com resposta perdida (`CreateInFlight` sem ID remoto), a remoção recupera a sessão pelo mesmo UUID, persiste seu ID e solicita o cancelamento. Um item apenas pendente, nunca enviado, é removido localmente sem criar sessão remota. `404` na exclusão da sessão significa que ela já está ausente; `409` ou falha de rede preservam os dados locais para consulta/nova tentativa. Sessões já terminais permitem a limpeza local.
+
+A finalização continua durável no Worker. O coordenador consulta `Finalizing` a cada dois segundos, por no máximo dois minutos; depois passa para `WaitingForServer` e encerra o serviço. **Consultar** na fila acompanha o resultado posterior por ação explícita. Não há retomada automática após perda do processo, reboot ou retorno da rede, nem início automático de outros itens da fila. O app não observa a galeria nem agenda sincronização periódica.
+
+O serviço respeita o limite cumulativo Android 15+ de seis horas por 24 horas e para imediatamente no callback de timeout. Este incremento não usa wake lock de CPU: transmissão contínua com tela bloqueada depende do sistema, rede e restrições do aparelho. Os limites, recuperação e matriz manual estão em [android-background-uploads.md](android-background-uploads.md).
 
 ## Roteiro de aceite Android pendente
 
-As evidências automatizadas e do APK de desenvolvimento estão em [mobile-validation.md](mobile-validation.md).
+As evidências automatizadas e do APK de desenvolvimento estão em [mobile-validation.md](mobile-validation.md). Execute também a [matriz de uploads fora da tela](android-background-uploads.md), incluindo Home/navegação, tela bloqueada, notificações negadas, pausa, parada do processo e timeout Android 15+.
 
 Use somente dados controlados e registre dispositivo/versão Android, revisão, APK, horários e resultados, sem tokens ou senhas:
 
@@ -80,4 +86,4 @@ Use somente dados controlados e registre dispositivo/versão Android, revisão, 
 7. Alternar servidor/conta e conferir separação de cache, fila e sessão; retornar ao escopo original e conferir a persistência dos dados locais.
 8. Restaurar um backup isolado, rotacionar obrigatoriamente a época antes da reconexão e confirmar reconstrução integral do cache, inclusive exclusões. Retomar um item cuja sessão não existe no banco recuperado e conferir recriação com o mesmo UUID, integridade e ausência de duplicatas. Remover um item após perda da resposta de criação e conferir cancelamento/ausência de reserva órfã. Seguir [backup-and-restore.md](backup-and-restore.md).
 
-iOS, execução em background, sincronização da galeria, distribuição em loja e assinatura de produção ficam para incrementos posteriores. O aceite exige evidência real do dispositivo e a operação do backend; a presença de testes automatizados não conclui esses passos.
+iOS, UIDT jobs para transferências longas, sincronização da galeria, distribuição em loja e assinatura de produção ficam para incrementos posteriores. O serviço deste incremento executa apenas um envio iniciado pelo usuário; agendamento periódico e retomada automática permanecem futuros. O aceite exige evidência real do dispositivo e a operação do backend; a presença de testes automatizados não conclui esses passos.

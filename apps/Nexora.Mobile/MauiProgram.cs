@@ -13,6 +13,13 @@ public static class MauiProgram
         builder.Services.AddSingleton(provider => new NexoraClient(
             new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromMinutes(3) },
             provider.GetRequiredService<ISecureSessionStore>(), provider.GetRequiredService<IInstallationIdentity>()));
+        builder.Services.AddSingleton(provider => new LocalLibraryCache(
+            Path.Combine(FileSystem.AppDataDirectory, "nexora"), provider.GetRequiredService<NexoraClient>()));
+        builder.Services.AddSingleton(provider => new UploadOutbox(
+            Path.Combine(FileSystem.AppDataDirectory, "nexora"), provider.GetRequiredService<NexoraClient>()));
+        builder.Services.AddSingleton<UploadTransferCoordinator>();
+        builder.Services.AddSingleton<AndroidUploadTransferRunner>();
+        builder.Services.AddSingleton<IUploadTransferRunner>(provider => provider.GetRequiredService<AndroidUploadTransferRunner>());
         builder.Services.AddSingleton<MobileWorkspace>();
         return builder.Build();
     }

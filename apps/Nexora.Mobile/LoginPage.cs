@@ -48,7 +48,7 @@ public sealed class LoginPage : ContentPage
             var scope = ServerScope.Create(server.Text ?? "", login.Text ?? "");
             if (!await DisplayAlertAsync("Novo registro", "A identificação local deste dispositivo será removida. Entre depois com sua senha para criar um novo registro no servidor.", "Continuar", "Cancelar")) return;
             await workspace.ConfigureAsync(scope, token);
-            try { await workspace.Client.LogoutAsync(token); }
+            try { await workspace.LogoutAsync(token); }
             catch (HttpRequestException) { }
             catch (NexoraApiException) { }
             InstallationIdentity.Forget(scope);

@@ -164,7 +164,7 @@ public sealed class AssetDetailPage : ContentPage
     private async Task RequireLoginAsync()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        try { await workspace.Client.LogoutAsync(timeout.Token); }
+        try { await workspace.LogoutAsync(timeout.Token); }
         catch (Exception) { /* Credentials are cleared before remote revocation. */ }
         await DisplayAlertAsync("Entre novamente", "Sua sessão expirou ou este dispositivo perdeu o acesso. Entre para continuar.", "OK");
         if (Window is { } window) window.Page = new LoginPage(workspace);
